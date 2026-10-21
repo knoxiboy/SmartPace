@@ -1,0 +1,75 @@
+"""Collect result CSVs into a single REPORT.md."""
+import json
+import os
+
+import pandas as pd
+
+
+def _md(df, floatfmt=3):
+    df = df.copy()
+    for c in df.columns:
+        if df[c].dtype.kind == "f":
+            df[c] = df[c].map(lambda v: "" if pd.isna(v) else f"{v:.{floatfmt}f}")
+    head = "| " + " | ".join(map(str, df.columns)) + " |"
+    sep = "|" + "|".join("---" for _ in df.columns) + "|"
+    body = ["| " + " | ".join(str(v) for v in r) + " |" for r in df.to_numpy()]
+    return "\n".join([head, sep] + body)
+
+
+def _read(out, name):
+    p = os.path.join(out, "results", name)
+    return pd.read_csv(p) if os.path.exists(p) else None
+
+
+def make_report(out):
+    info = {}
+    p = os.path.join(out, "results", "run_info.json")
+    if os.path.exists(p):
+        info = json.load(open(p, encoding="utf-8"))
+    L = ["# SmartPace - results report", ""]
+    if info.get("synthetic"):
+        L += ["> **SYNTHETIC DATA RUN.** These numbers come from generated ECG and only prove that the "
+              "pipeline executes. They say nothing about real-world performance.", ""]
+    L += ["> The decision-support simulator is **not a clinically validated pacemaker controller**.", ""]
+    if info:
+        L += [f"- Noise source: {info.get('noise_source')}", f"- Total run time: {info.get('total_seconds')} s", ""]
+        mt = info.get("main_train")
+        if mt and mt != "A":
+            L += [f"- Experiments 3-6 use the ResNet1D trained on **{mt}** (MIT-BIH + PTB-XL training splits). Their "
+                  "test sets are therefore in-domain for both datasets; the cross-dataset study is Section 2.", ""]
+
+    def section(title, files, note=None, figs=()):
+        L.append(f"## {title}")
+        if note:
+            L.append(note)
+        for name, cap in files:
+            df = _read(out, name)
+            if df is not None:
+                L.extend(["", f"**{cap}**", "", _md(df), ""])
+        for f in figs:
+            if os.path.exists(os.path.join(out, "figures", f)):
+                L.extend([f"![{f}](figures/{f})", ""])
+
+    section("1. Detection, uncertainty and rejection (remark 1)",
+            [("exp1_summary.csv", "MIT-BIH test (inter-patient), mean ± std over seeds"),
+             ("exp1_uncertainty.csv", "Uncertainty methods (ResNet1D)")], figs=["exp1_rejection.png"])
+    section("2. Cross-dataset generalisation (remark 2)",
+            [("exp2_label_distribution.csv", "Unified-label window counts"),
+             ("exp2_summary.csv", "Train / test combinations")], figs=["exp2_confusion.png"])
+    section("3. Calibration and explanations (remark 3)",
+            [("exp3_calibration.csv", "Calibration"), ("exp3_plausibility.csv",
+             "Attribution enrichment inside P / QRS / T regions (>1 = concentrated there)")],
+            figs=["exp3_reliability.png", "exp3_attributions.png"])
+    ex = os.path.join(out, "results", "exp3_explanation.json")
+    if os.path.exists(ex):
+        s = json.load(open(ex, encoding="utf-8"))["summary"]
+        L += ["**Explanation metrics**", "", "```", json.dumps(s, indent=1), "```", ""]
+    section("4. Noise robustness and rejection (remark 4)", [("exp4_noise.csv", "Performance vs. noise type and SNR")],
+            figs=["exp4_noise.png", "exp4_rejection_rate.png"])
+    section("5. Edge model benchmark (remark 5)", [("exp5_edge.csv", "FP32 vs INT8 vs pruned")],
+            note="Hardware: see results/hardware.json. Latency is batch-1 per 10-s window.")
+    section("6. SIMULATED decision support (remark 6)", [("exp6_simulator.csv", "Policy comparison")],
+            note="False triggers are counted as events per hour of replayed recording; delay is the time from "
+                 "episode start to the first correct simulated action.", figs=["exp6_timeline.png"])
+    with open(os.path.join(out, "REPORT.md"), "w", encoding="utf-8") as f:
+        f.write("\n".join(L))
