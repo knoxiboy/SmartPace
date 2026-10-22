@@ -58,7 +58,11 @@ def make_report(out):
             figs=["exp1_rejection.png", "exp1_adaptive_abstention.png"])
     section("2. Cross-dataset generalisation (remark 2)",
             [("exp2_label_distribution.csv", "Unified-label window counts"),
-             ("exp2_summary.csv", "Train / test combinations")], figs=["exp2_confusion.png"])
+             ("exp2_summary.csv", "Train / test combinations"),
+             ("exp2_adaptation.csv", "Experiment E: Limited Target Adaptation vs Cross-Dataset Transfer"),
+             ("exp2_sampling_control.csv", "Sampling Rate & Bandwidth Control Experiment"),
+             ("exp2_cross_rejection.csv", "Cross-Dataset Rejection: Selective Prediction under Domain Shift")],
+            figs=["exp2_confusion.png", "exp2_cross_rejection.png"])
     section("3. Calibration and explanations (remark 3)",
             [("exp3_calibration.csv", "Calibration"), ("exp3_plausibility.csv",
              "Attribution enrichment inside P / QRS / T regions (>1 = concentrated there)")],

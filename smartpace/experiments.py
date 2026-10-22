@@ -22,6 +22,8 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 from . import config as C
 from . import edge, explain, simulator as S
 from . import evaluation as E
+from .adaptation import (adapt_linear_probe, evaluate_cross_dataset_rejection,
+                          evaluate_sampling_rate_control)
 from .datasets import get_split, load_dataset, merge, class_counts
 from .noise import NoiseBank, download_nstdb
 from .preprocess import SQIGate, feature_matrix, prepare_input, sqi_features
@@ -383,6 +385,101 @@ def exp2_cross_dataset(ctx):
         a_.set_title("Trained on MIT-BIH -> " + nm, fontsize=9); a_.set_xlabel("predicted"); a_.set_ylabel("true")
     fig.tight_layout(); fig.savefig(ctx.p("figures", "exp2_confusion.png"), dpi=130); plt.close(fig)
     print(sdf[["model", "train", "test", "macro_f1", "accuracy"]].to_string(index=False))
+
+    # ---- Improvement 2: Cross-Dataset Generalization & Adaptation Suite
+    print("  evaluating Experiment E (few-shot adaptation) ...", flush=True)
+    mA = ctx.models("resnet1d", "A")[0]
+    F_A_tr = extract_features(mA, ctx.inp("A", "train"))
+    y_A_tr = ctx.split("A", "train")[1]
+
+    # Target validation slice for adaptation
+    X_B_va, y_B_va, _, _ = ctx.split("B", "val")
+    rng = np.random.default_rng(42)
+    n_adapt = min(250, len(X_B_va))
+    idx_adapt = rng.choice(len(X_B_va), size=n_adapt, replace=False)
+
+    F_B_adapt = extract_features(mA, ctx.inp("B", "val")[idx_adapt])
+    y_B_adapt = y_B_va[idx_adapt]
+
+    F_B_te = extract_features(mA, ctx.inp("B", "test"))
+    y_B_te = ctx.split("B", "test")[1]
+
+    probs_adapt, _ = adapt_linear_probe(
+        features_source_train=F_A_tr,
+        y_source_train=y_A_tr,
+        features_target_adapt=F_B_adapt,
+        y_target_adapt=y_B_adapt,
+        features_target_test=F_B_te,
+        random_state=42,
+    )
+
+    adapt_metrics = _metrics(y_B_te, probs_adapt)
+    probs_unadapted = softmax(predict_logits(mA, ctx.inp("B", "test")), axis=1)
+    unadapted_metrics = _metrics(y_B_te, probs_unadapted)
+    mB = ctx.models("resnet1d", "B")[0]
+    in_dataset_metrics = _metrics(y_B_te, softmax(predict_logits(mB, ctx.inp("B", "test")), axis=1))
+
+    adapt_rows = [
+        {"experiment": "Exp C: Unadapted Cross-Dataset (MIT -> PTB-XL)", "macro_f1": unadapted_metrics["macro_f1"], "accuracy": unadapted_metrics["accuracy"], "auroc": unadapted_metrics["auroc"]},
+        {"experiment": "Exp E: Limited Target Adaptation (250 samples)", "macro_f1": adapt_metrics["macro_f1"], "accuracy": adapt_metrics["accuracy"], "auroc": adapt_metrics["auroc"]},
+        {"experiment": "Exp B: Independent Target In-Dataset Ceiling", "macro_f1": in_dataset_metrics["macro_f1"], "accuracy": in_dataset_metrics["accuracy"], "auroc": in_dataset_metrics["auroc"]},
+    ]
+    ctx.save_csv(pd.DataFrame(adapt_rows), "exp2_adaptation.csv")
+
+    # ---- Sampling-Rate Control Experiment
+    print("  evaluating sampling-rate control experiment ...", flush=True)
+    sampling_control = evaluate_sampling_rate_control(
+        model=mA,
+        x_test_250hz=ctx.inp("B", "test"),
+        y_test=y_B_te,
+        predict_fn=predict_logits,
+    )
+    samp_rows = [{"sampling_condition": k, **v} for k, v in sampling_control.items()]
+    ctx.save_csv(pd.DataFrame(samp_rows), "exp2_sampling_control.csv")
+
+    # ---- Cross-Dataset Selective Rejection (Answering the Research Question)
+    print("  evaluating uncertainty/shift rejection under domain shift ...", flush=True)
+    mah_A = MahalanobisShiftDetector().fit(F_A_tr, y_A_tr)
+    mah_A.calibrate(extract_features(mA, ctx.inp("A", "val")), target_coverage=ctx.a.reject_coverage)
+
+    tau_unc_A = E.threshold_for_coverage(E.entropy(softmax(predict_logits(mA, ctx.inp("A", "val")), axis=1)), ctx.a.reject_coverage)
+    abstention_A = AdaptiveAbstentionModule(
+        sqi_gate=ctx.gate(),
+        shift_detector=mah_A,
+        tau_unc=tau_unc_A,
+        tau_shift=mah_A.threshold_,
+    )
+
+    cross_rejection_curves = evaluate_cross_dataset_rejection(
+        y_true=y_B_te,
+        probs=probs_unadapted,
+        features=F_B_te,
+        abstention_module=abstention_A,
+    )
+    ctx.save_csv(pd.DataFrame(cross_rejection_curves), "exp2_cross_rejection.csv")
+
+    # Plot cross-dataset rejection & adaptation figure
+    fig, ax = plt.subplots(1, 2, figsize=(10, 4))
+    cr_df = pd.DataFrame(cross_rejection_curves)
+    ax[0].plot(cr_df["coverage"] * 100, cr_df["macro_f1"], marker="o", color="#1976d2", label="Selective Prediction (MIT -> PTB-XL)")
+    ax[0].axhline(unadapted_metrics["macro_f1"], color="#d32f2f", linestyle="--", label="Unadapted Baseline (100% Coverage)")
+    ax[0].set_xlabel("Coverage (% Accepted)")
+    ax[0].set_ylabel("Macro-F1 (Accepted Set)")
+    ax[0].set_title("Cross-Dataset Rejection: Coverage vs Macro-F1")
+    ax[0].invert_xaxis()
+    ax[0].grid(alpha=0.3)
+    ax[0].legend(fontsize=8)
+
+    ad_df = pd.DataFrame(adapt_rows)
+    colors = ["#d32f2f", "#1976d2", "#2e7d32"]
+    short_labels = ["C. Unadapted", "E. Adapted", "B. In-Dataset"]
+    ax[1].bar(short_labels, ad_df["macro_f1"], color=colors, alpha=0.85)
+    ax[1].set_ylabel("Macro-F1")
+    ax[1].set_title("Adaptation Benefit (Exp C vs E vs B)")
+    ax[1].grid(alpha=0.3, axis="y")
+    fig.tight_layout()
+    fig.savefig(ctx.p("figures", "exp2_cross_rejection.png"), dpi=130)
+    plt.close(fig)
 
 
 # ============================================================================= exp3

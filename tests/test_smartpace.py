@@ -334,3 +334,57 @@ def test_adaptive_abstention_module_and_four_configurations():
     assert res["4. Full Adaptive Tri-Gate (SmartPace)"]["risk_at_coverage"] <= res["1. Baseline Classifier"]["risk_at_coverage"]
     assert res["4. Full Adaptive Tri-Gate (SmartPace)"]["auroc_ood_detection"] > 0.8
 
+
+def test_adapt_linear_probe():
+    from smartpace.adaptation import adapt_linear_probe
+    rng = np.random.default_rng(0)
+    F_src = rng.normal(size=(60, 16))
+    y_src = rng.choice([0, 1, 2], size=60)
+    F_adapt = rng.normal(loc=1.0, size=(20, 16))
+    y_adapt = rng.choice([0, 1, 2], size=20)
+    F_te = rng.normal(loc=1.0, size=(30, 16))
+
+    probs, preds = adapt_linear_probe(
+        features_source_train=F_src,
+        y_source_train=y_src,
+        features_target_adapt=F_adapt,
+        y_target_adapt=y_adapt,
+        features_target_test=F_te,
+    )
+    assert probs.shape == (30, C.N_CLASSES)
+    assert len(preds) == 30
+    assert np.allclose(probs.sum(axis=1), 1.0, atol=1e-5)
+
+
+def test_sampling_rate_control_and_cross_rejection():
+    from smartpace.adaptation import evaluate_cross_dataset_rejection, evaluate_sampling_rate_control
+    from smartpace.models import CNN1D
+    from smartpace.reliability import AdaptiveAbstentionModule, MahalanobisShiftDetector
+
+    rng = np.random.default_rng(1)
+    n = 10
+    x = rng.normal(size=(n, 1, 2500)).astype(np.float32)
+    y = rng.choice([0, 1, 2], size=n)
+    model = CNN1D().eval()
+
+    def dummy_pred(m, batch):
+        return rng.normal(size=(len(batch), C.N_CLASSES)).astype(np.float32)
+
+    # 1. Test sampling rate control
+    samp_res = evaluate_sampling_rate_control(model, x, y, dummy_pred)
+    assert "1. Standard Harmonized (250 Hz)" in samp_res
+    assert "2. Bandwidth-Limited (100 Hz Sim)" in samp_res
+    assert "3. High-Rate Reconstructed (500 Hz Sim)" in samp_res
+
+    # 2. Test cross rejection
+    features = rng.normal(size=(n, 16))
+    probs = np.full((n, C.N_CLASSES), 0.2, dtype=np.float32)
+    shift_det = MahalanobisShiftDetector().fit(features, y)
+    abstention = AdaptiveAbstentionModule(shift_detector=shift_det, tau_unc=1.0, tau_shift=10.0)
+
+    curves = evaluate_cross_dataset_rejection(y, probs, features, abstention)
+    assert len(curves) > 0
+    assert "coverage" in curves[0]
+    assert "macro_f1" in curves[0]
+
+
