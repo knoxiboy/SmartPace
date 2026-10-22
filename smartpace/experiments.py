@@ -539,10 +539,95 @@ def exp3_calibration_explain(ctx):
     plaus = explain.plausibility(attr, rs, preds)
     gap = explain.completeness_gap(m0, xs[:16], steps=max(64, ctx.a.ig_steps))
     out = {"n_windows": int(len(idx)), "ig_steps": ctx.a.ig_steps, "completeness_gap": gap, **stab, **faith}
-    with open(ctx.p("results", "exp3_explanation.json"), "w") as f:
-        json.dump({"summary": out, "plausibility_enrichment": plaus}, f, indent=2)
     prow = [{"predicted_class": c, **v} for c, v in plaus.items()]
     ctx.save_csv(pd.DataFrame(prow), "exp3_plausibility.csv")
+
+    # -----------------------------------------------------------------------------
+    # Improvement 4: Reliability-Tested Explanations & Stress Testing
+    # -----------------------------------------------------------------------------
+    print("--- Improvement 4: Counterfactual Stress-Testing & Failure Mode Categorization ---", flush=True)
+    probs_sub = softmax(predict_logits(m0, xs), axis=1)
+    stress_records, indiv_stab = explain.counterfactual_stress_test(
+        model=m0,
+        x=xs,
+        raw_windows=rs,
+        y_true=ys,
+        probs=probs_sub,
+        steps=ctx.a.ig_steps,
+        topk_frac=0.10,
+        sigma=0.03,
+    )
+    df_stress = ctx.save_csv(pd.DataFrame(stress_records), "exp3_stress_test_cases.csv")
+
+    # Evaluate error warning signals (Research question: does explanation instability predict errors?)
+    warn_eval = explain.evaluate_explanation_error_warning(ys, probs_sub, indiv_stab["spearman"])
+    ctx.save_csv(pd.DataFrame([warn_eval]), "exp3_error_detection_auroc.csv")
+    print(f"  Error detection AUROC: Confidence={warn_eval['auroc_confidence_only']:.3f}, "
+          f"Instability={warn_eval['auroc_explanation_instability_only']:.3f}, "
+          f"Combined={warn_eval['auroc_combined_warning']:.3f} (Gain={warn_eval['auroc_gain_over_confidence']:+.3f})", flush=True)
+
+    # Multi-panel Failure Mode Figure (Cases A, B, C)
+    fig, axes = plt.subplots(3, 1, figsize=(12, 8.5), sharex=True)
+    t = np.arange(C.WIN) / C.FS
+    clean_sm = indiv_stab["clean_attr"]
+    pert_sm = indiv_stab["perturbed_attr"]
+
+    # Select representative indices for Cases A, B, C
+    case_a_idx = df_stress[df_stress.failure_case.str.startswith("Case A")].index
+    case_b_idx = df_stress[df_stress.failure_case.str.startswith("Case B")].index
+    case_c_idx = df_stress[df_stress.failure_case.str.startswith("Case C")].index
+
+    idx_a = case_a_idx[0] if len(case_a_idx) > 0 else df_stress[df_stress.is_correct].index[0]
+    idx_b = case_b_idx[0] if len(case_b_idx) > 0 else (df_stress[~df_stress.is_correct].index[0] if (~df_stress.is_correct).any() else 0)
+    idx_c = case_c_idx[0] if len(case_c_idx) > 0 else df_stress[df_stress.confidence >= 0.8].sort_values("stability_spearman").index[0]
+
+    chosen = [
+        (idx_a, "Case A: Correct Prediction, Stable Explanation", "#2ca02c"),
+        (idx_b, "Case B: Incorrect Prediction, Suspicious Explanation", "#d62728"),
+        (idx_c, "Case C: Confident Prediction, Unstable Explanation (Silent Failure)", "#ff7f0e"),
+    ]
+
+    for ax_idx, (w_idx, title_prefix, border_col) in enumerate(chosen):
+        ax = axes[ax_idx]
+        row_data = df_stress.iloc[w_idx]
+        ax.plot(t, xs[w_idx, 0], color="black", lw=0.9, label="ECG waveform")
+
+        # Shade physiological regions: QRS, P, T
+        m_regions = explain.region_masks(rs[w_idx])
+        y_min, y_max = float(xs[w_idx, 0].min()), float(xs[w_idx, 0].max())
+        ax.fill_between(t, y_min, y_max, where=m_regions["QRS"], color="#aec7e8", alpha=0.35, label="QRS Complex")
+        ax.fill_between(t, y_min, y_max, where=m_regions["P"], color="#c7e9c0", alpha=0.35, label="P-Wave")
+        ax.fill_between(t, y_min, y_max, where=m_regions["T"], color="#fdd0a2", alpha=0.35, label="T-Wave")
+
+        # Attribution overlay
+        ax_attr = ax.twinx()
+        c_norm = clean_sm[w_idx] / (clean_sm[w_idx].max() + 1e-12)
+        p_norm = pert_sm[w_idx] / (pert_sm[w_idx].max() + 1e-12)
+        ax_attr.fill_between(t, 0, c_norm, color="red", alpha=0.3, label="Clean Attribution (IG)")
+        ax_attr.plot(t, p_norm, color="blue", ls="--", lw=1.0, alpha=0.7, label="Perturbed Attribution")
+        ax_attr.set_yticks([])
+
+        ax.set_ylabel(f"{row_data.predicted_class}", fontweight="bold", fontsize=9)
+        ax.set_title(f"{title_prefix}\nTrue: {row_data.true_class} | Pred: {row_data.predicted_class} | Conf: {row_data.confidence:.2f} | "
+                     f"Spearman Stability ρ: {row_data.stability_spearman:.2f} | CF Flip: {row_data.counterfactual_flip_highlighted}",
+                     fontsize=9, color=border_col, loc="left", fontweight="bold")
+        ax.grid(alpha=0.25)
+        if ax_idx == 0:
+            lines1, labels1 = ax.get_legend_handles_labels()
+            lines2, labels2 = ax_attr.get_legend_handles_labels()
+            ax.legend(lines1 + lines2, labels1 + labels2, loc="upper right", fontsize=6, ncol=3)
+
+    axes[-1].set_xlabel("Time (s)")
+    fig.tight_layout()
+    fig.savefig(ctx.p("figures", "exp3_failure_cases.png"), dpi=130)
+    plt.close(fig)
+
+    # Enrich summary JSON
+    out["failure_mode_counts"] = df_stress.failure_case.value_counts().to_dict()
+    out["error_warning_auroc"] = warn_eval
+    with open(ctx.p("results", "exp3_explanation.json"), "w") as f:
+        json.dump({"summary": out, "plausibility_enrichment": plaus}, f, indent=2)
+
     # figure: one example per class
     fig, axes = plt.subplots(C.N_CLASSES, 1, figsize=(10, 9), sharex=True)
     t = np.arange(C.WIN) / C.FS

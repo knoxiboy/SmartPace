@@ -480,3 +480,51 @@ def test_noise_rejection_policies():
     assert "rejection_rate" in breakdown[0]
 
 
+def test_explanation_stress_testing():
+    from smartpace.explain import (
+        counterfactual_stress_test,
+        evaluate_explanation_error_warning,
+        individual_stability,
+    )
+    from smartpace.models import CNN1D
+
+    rng = np.random.default_rng(123)
+    n = 6
+    L = 500  # shortened length for quick unit testing
+    x = rng.normal(size=(n, 1, L)).astype(np.float32)
+    raw = rng.normal(size=(n, L)).astype(np.float32)
+    y_true = rng.choice(list(range(C.N_CLASSES)), size=n)
+
+    model = CNN1D().eval()
+
+    # 1. Test individual stability
+    stab = individual_stability(model, x, steps=4, topk_frac=0.1, sigma=0.02)
+    assert len(stab["spearman"]) == n
+    assert len(stab["topk_jaccard"]) == n
+    assert stab["clean_attr"].shape == (n, L)
+    assert stab["perturbed_attr"].shape == (n, L)
+
+    # 2. Test counterfactual stress test
+    records, _ = counterfactual_stress_test(
+        model=model,
+        x=x,
+        raw_windows=raw,
+        y_true=y_true,
+        steps=4,
+        topk_frac=0.1,
+        sigma=0.02,
+    )
+    assert len(records) == n
+    assert "failure_case" in records[0]
+    assert "is_correct" in records[0]
+    assert "physiological_share" in records[0]
+    assert "counterfactual_flip_highlighted" in records[0]
+
+    # 3. Test explanation error warning
+    dummy_probs = np.full((n, C.N_CLASSES), 0.2, dtype=np.float32)
+    dummy_probs[0, 0] = 0.9  # confident
+    warning_res = evaluate_explanation_error_warning(y_true, dummy_probs, stab["spearman"])
+    assert "auroc_confidence_only" in warning_res
+    assert "auroc_combined_warning" in warning_res
+
+

@@ -18,6 +18,14 @@ from .noise_policy import (
     evaluate_policy_operating_point,
     generate_tradeoff_curve,
 )
+from .explain import (
+    counterfactual_stress_test,
+    evaluate_explanation_error_warning,
+    individual_stability,
+    integrated_gradients,
+    plausibility,
+    stability,
+)
 from .reliability import (
     AdaptiveAbstentionModule,
     EuclideanShiftDetector,

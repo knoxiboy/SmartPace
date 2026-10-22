@@ -136,3 +136,183 @@ def completeness_gap(model, x, steps=64):
     fx = predict_logits(model, x)[np.arange(len(x)), pred]
     f0 = predict_logits(model, np.zeros_like(x))[np.arange(len(x)), pred]
     return float(np.mean(np.abs(a.sum(1) - (fx - f0)) / (np.abs(fx - f0) + 1e-6)))
+
+
+# -----------------------------------------------------------------------------
+# Improvement 4: Reliability-Tested Explanations & Stress Testing
+# -----------------------------------------------------------------------------
+def individual_stability(model, x, target=None, sigma=0.03, steps=32, topk_frac=0.1, seed=0, device=None):
+    """Computes per-window attribution stability metrics under physiologically plausible perturbations.
+    
+    Returns array of Spearman correlations and top-k Jaccard overlaps for each window,
+    along with clean and perturbed smoothed attributions.
+    """
+    rng = np.random.default_rng(seed)
+    if target is None:
+        target = predict_logits(model, x, device).argmax(1)
+    a1 = smooth_abs(integrated_gradients(model, x, target, steps, device))
+    xn = (x + sigma * rng.standard_normal(x.shape)).astype(np.float32)
+    a2 = smooth_abs(integrated_gradients(model, xn, target, steps, device))
+    k = max(1, int(topk_frac * x.shape[-1]))
+
+    rhos, jacs = [], []
+    for u, v in zip(a1, a2):
+        r, _ = spearmanr(u, v)
+        rhos.append(float(r) if np.isfinite(r) else 0.0)
+        tu, tv = set(np.argsort(-u)[:k]), set(np.argsort(-v)[:k])
+        jac = len(tu & tv) / (len(tu | tv) + 1e-12)
+        jacs.append(float(jac))
+
+    return {
+        "spearman": np.array(rhos, dtype=np.float32),
+        "topk_jaccard": np.array(jacs, dtype=np.float32),
+        "clean_attr": a1,
+        "perturbed_attr": a2,
+    }
+
+
+def counterfactual_stress_test(
+    model,
+    x,
+    raw_windows,
+    y_true,
+    probs=None,
+    steps=32,
+    topk_frac=0.10,
+    sigma=0.03,
+    seed=0,
+    device=None,
+):
+    """Performs per-sample explanation stress testing and categorizes failure modes.
+
+    Categorizes each window into:
+    - Case A: Correct prediction, stable explanation
+    - Case B: Incorrect prediction, suspicious explanation (unstable or concentrates on background)
+    - Case C: Confident prediction, unstable explanation (high softmax confidence, but fragile explanation)
+    - Case D: Other / borderline
+    """
+    device = device or get_device()
+    n = len(x)
+    y_true = np.asarray(y_true, dtype=np.int64)
+
+    if probs is None:
+        lg = predict_logits(model, x, device)
+        probs = torch.softmax(torch.from_numpy(lg), dim=1).numpy()
+
+    preds = probs.argmax(axis=1)
+    confs = probs.max(axis=1)
+
+    # 1. Per-window stability
+    stab = individual_stability(model, x, target=preds, sigma=sigma, steps=steps, topk_frac=topk_frac, seed=seed, device=device)
+    rhos = stab["spearman"]
+    jacs = stab["topk_jaccard"]
+    attr = stab["clean_attr"]
+
+    # 2. Counterfactual region perturbation test
+    # Highlighted region perturbation (top k% most attributed) vs control region (bottom k%)
+    L = x.shape[-1]
+    k_len = max(1, int(topk_frac * L))
+    x_pert_high = x.copy()
+    x_pert_ctrl = x.copy()
+
+    for i in range(n):
+        order = np.argsort(-attr[i])
+        high_idx = order[:k_len]
+        ctrl_idx = order[-k_len:]
+        x_pert_high[i, 0, high_idx] = 0.0
+        x_pert_ctrl[i, 0, ctrl_idx] = 0.0
+
+    p_high = torch.softmax(torch.from_numpy(predict_logits(model, x_pert_high, device)), dim=1).numpy()
+    p_ctrl = torch.softmax(torch.from_numpy(predict_logits(model, x_pert_ctrl, device)), dim=1).numpy()
+    pred_high = p_high.argmax(axis=1)
+    pred_ctrl = p_ctrl.argmax(axis=1)
+
+    # 3. Physiological region localization and overlap
+    records = []
+    for i in range(n):
+        m = region_masks(raw_windows[i])
+        a = attr[i]
+        tot = a.sum() + 1e-12
+
+        share_qrs = float(a[m["QRS"]].sum() / tot) if m["QRS"].any() else 0.0
+        share_p = float(a[m["P"]].sum() / tot) if m["P"].any() else 0.0
+        share_t = float(a[m["T"]].sum() / tot) if m["T"].any() else 0.0
+        phys_share = share_qrs + share_p + share_t
+        bg_share = 1.0 - phys_share
+
+        qrs_enr = (share_qrs / m["QRS"].mean()) if m["QRS"].mean() > 0 else 0.0
+        p_enr = (share_p / m["P"].mean()) if m["P"].mean() > 0 else 0.0
+        t_enr = (share_t / m["T"].mean()) if m["T"].mean() > 0 else 0.0
+
+        is_corr = bool(preds[i] == y_true[i])
+        conf_i = float(confs[i])
+        rho_i = float(rhos[i])
+        jac_i = float(jacs[i])
+
+        cf_flip_high = bool(pred_high[i] != preds[i])
+        cf_flip_ctrl = bool(pred_ctrl[i] != preds[i])
+
+        # Failure mode categorization
+        if is_corr and (rho_i >= 0.70) and (phys_share >= 0.25):
+            case = "Case A: Correct, stable explanation"
+        elif (not is_corr) and ((bg_share >= 0.70) or (rho_i < 0.60)):
+            case = "Case B: Incorrect, suspicious explanation"
+        elif (conf_i >= 0.85) and ((rho_i < 0.60) or (jac_i < 0.35)):
+            case = "Case C: Confident, unstable explanation"
+        else:
+            case = "Case D: Standard / intermediate"
+
+        records.append({
+            "window_idx": i,
+            "true_class": CLASSES[y_true[i]],
+            "predicted_class": CLASSES[preds[i]],
+            "confidence": conf_i,
+            "is_correct": is_corr,
+            "stability_spearman": rho_i,
+            "topk_jaccard": jac_i,
+            "share_qrs": share_qrs,
+            "share_p": share_p,
+            "share_t": share_t,
+            "physiological_share": phys_share,
+            "background_share": bg_share,
+            "qrs_enrichment": float(qrs_enr),
+            "p_enrichment": float(p_enr),
+            "t_enrichment": float(t_enr),
+            "counterfactual_flip_highlighted": cf_flip_high,
+            "counterfactual_flip_control": cf_flip_ctrl,
+            "failure_case": case,
+        })
+
+    return records, stab
+
+
+def evaluate_explanation_error_warning(y_true, probs, stability_spearman):
+    """Evaluates whether explanation instability improves error detection AUROC over confidence alone."""
+    from sklearn.metrics import roc_auc_score
+
+    y_true = np.asarray(y_true)
+    preds = probs.argmax(axis=1)
+    is_error = (preds != y_true).astype(int)
+
+    if len(np.unique(is_error)) < 2:
+        return {"auroc_confidence": 0.5, "auroc_explanation_instability": 0.5, "auroc_combined": 0.5}
+
+    confs = probs.max(axis=1)
+    unc_score = 1.0 - confs
+    instability_score = 1.0 - np.clip(stability_spearman, -1.0, 1.0) / 2.0  # mapped to [0, 1]
+
+    # Normalize scores
+    u_norm = (unc_score - unc_score.min()) / (unc_score.max() - unc_score.min() + 1e-12)
+    s_norm = (instability_score - instability_score.min()) / (instability_score.max() - instability_score.min() + 1e-12)
+    comb_score = 0.65 * u_norm + 0.35 * s_norm
+
+    auc_conf = float(roc_auc_score(is_error, unc_score))
+    auc_instab = float(roc_auc_score(is_error, instability_score))
+    auc_comb = float(roc_auc_score(is_error, comb_score))
+
+    return {
+        "auroc_confidence_only": auc_conf,
+        "auroc_explanation_instability_only": auc_instab,
+        "auroc_combined_warning": auc_comb,
+        "auroc_gain_over_confidence": auc_comb - auc_conf,
+    }

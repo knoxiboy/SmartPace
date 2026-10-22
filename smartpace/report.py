@@ -63,10 +63,14 @@ def make_report(out):
              ("exp2_sampling_control.csv", "Sampling Rate & Bandwidth Control Experiment"),
              ("exp2_cross_rejection.csv", "Cross-Dataset Rejection: Selective Prediction under Domain Shift")],
             figs=["exp2_confusion.png", "exp2_cross_rejection.png"])
-    section("3. Calibration and explanations (remark 3)",
-            [("exp3_calibration.csv", "Calibration"), ("exp3_plausibility.csv",
-             "Attribution enrichment inside P / QRS / T regions (>1 = concentrated there)")],
-            figs=["exp3_reliability.png", "exp3_attributions.png"])
+    section("3. Calibration and explanations (remark 3 & Improvement 4)",
+            [("exp3_calibration.csv", "Calibration"),
+             ("exp3_plausibility.csv", "Attribution enrichment inside P / QRS / T regions (>1 = concentrated there)"),
+             ("exp3_stress_test_cases.csv", "Explanation Stress Testing & Failure Mode Classification (Cases A, B, C)"),
+             ("exp3_error_detection_auroc.csv", "Error Detection AUROC: Confidence vs. Explanation Instability vs. Combined")],
+            figs=["exp3_reliability.png", "exp3_attributions.png", "exp3_failure_cases.png"],
+            note="Improvement 4 stress-tests explanations under physiological perturbations and counterfactuals, revealing Case C silent failures "
+                 "where confidence is high but attributions are fragile.")
     ex = os.path.join(out, "results", "exp3_explanation.json")
     if os.path.exists(ex):
         s = json.load(open(ex, encoding="utf-8"))["summary"]
