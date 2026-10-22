@@ -25,7 +25,9 @@ from . import evaluation as E
 from .datasets import get_split, load_dataset, merge, class_counts
 from .noise import NoiseBank, download_nstdb
 from .preprocess import SQIGate, feature_matrix, prepare_input, sqi_features
-from .train import (TrainCfg, ensemble_logits, get_or_train, load_model, mc_dropout_probs,
+from .reliability import (AdaptiveAbstentionModule, EuclideanShiftDetector, MahalanobisShiftDetector,
+                          evaluate_four_configurations)
+from .train import (TrainCfg, ensemble_logits, extract_features, get_or_train, load_model, mc_dropout_probs,
                     predict_logits)
 
 warnings.filterwarnings("ignore")
@@ -230,6 +232,95 @@ def exp1_detection(ctx):
         a_.set_xlabel("coverage (fraction kept)"); a_.set_title(t); a_.invert_xaxis(); a_.grid(alpha=.3)
     ax[0].legend(); fig.tight_layout(); fig.savefig(ctx.p("figures", "exp1_rejection.png"), dpi=130); plt.close(fig)
     print(pd.DataFrame(summ)[["model", "macro_f1", "accuracy"]].to_string(index=False))
+
+    # ---- Improvement 1: Adaptive reliability & distribution shift detection
+    print("  evaluating adaptive reliability and shift detection (Improvement 1) ...", flush=True)
+    xtr = ctx.inp("A", "train")
+    ytr = ctx.split("A", "train")[1]
+
+    # Extract learned feature representations using ResNet1D
+    F_tr = extract_features(ms[0], xtr)
+    F_va = extract_features(ms[0], xva)
+    F_te = extract_features(ms[0], xte)
+
+    # 1. Fit & calibrate Mahalanobis and Euclidean Shift Detectors
+    mah_detector = MahalanobisShiftDetector()
+    mah_detector.fit(F_tr, ytr)
+    mah_detector.calibrate(F_va, target_coverage=ctx.a.reject_coverage)
+
+    euc_detector = EuclideanShiftDetector()
+    euc_detector.fit(F_tr, ytr)
+    euc_detector.calibrate(F_va, target_coverage=ctx.a.reject_coverage)
+
+    # 2. Extract SQI features for test windows
+    sqi_te = sqi_features(Xte_raw)
+
+    # 3. Create OOD test samples (severe noise bursts + out-of-domain shift)
+    rng = np.random.default_rng(42)
+    ood_n = min(400, len(Xte_raw))
+    ood_raw = ctx.noise.corrupt(Xte_raw[:ood_n], "em", -6.0, rng)
+    ood_inp = prepare_input(ood_raw, filt=True)
+    F_ood = extract_features(ms[0], ood_inp)
+
+    # Compute OOD detection AUROCs
+    from sklearn.metrics import roc_auc_score
+    mah_scores_te = mah_detector.score(F_te)
+    mah_scores_ood = mah_detector.score(F_ood)
+    euc_scores_te = euc_detector.score(F_te)
+    euc_scores_ood = euc_detector.score(F_ood)
+
+    y_ood = np.concatenate([np.zeros(len(F_te), dtype=int), np.ones(len(F_ood), dtype=int)])
+    mah_ood_auroc = float(roc_auc_score(y_ood, np.concatenate([mah_scores_te, mah_scores_ood])))
+    euc_ood_auroc = float(roc_auc_score(y_ood, np.concatenate([euc_scores_te, euc_scores_ood])))
+
+    shift_comparison = [
+        {"detector": "Euclidean Nearest-Centroid (Baseline)", "ood_auroc": euc_ood_auroc, "val_threshold": euc_detector.threshold_},
+        {"detector": "Mahalanobis Representation Distance (SmartPace)", "ood_auroc": mah_ood_auroc, "val_threshold": mah_detector.threshold_},
+    ]
+    ctx.save_csv(pd.DataFrame(shift_comparison), "exp1_shift_detector_comparison.csv")
+
+    # 4. Tri-Gate Adaptive Abstention Module
+    pt_ens, _ = method("ensemble", xte)
+    tau_unc = E.threshold_for_coverage(E.entropy(method("ensemble", xva)[0]), ctx.a.reject_coverage)
+    abstention_mod = AdaptiveAbstentionModule(
+        sqi_gate=ctx.gate(),
+        shift_detector=mah_detector,
+        tau_unc=tau_unc,
+        tau_shift=mah_detector.threshold_,
+    )
+
+    conf_results = evaluate_four_configurations(
+        y_true=yte,
+        probs=pt_ens,
+        features=F_te,
+        sqi_features=sqi_te,
+        abstention_module=abstention_mod,
+        ood_features=F_ood,
+    )
+    conf_rows = [{"configuration": k, **v} for k, v in conf_results.items()]
+    ctx.save_csv(pd.DataFrame(conf_rows), "exp1_reliability_comparison.csv")
+
+    # Plot 4-configuration comparison
+    fig, ax = plt.subplots(1, 2, figsize=(10, 4))
+    cf_df = pd.DataFrame(conf_rows)
+    colors = ["#757575", "#1976d2", "#f57c00", "#2e7d32"]
+    short_names = ["1. Baseline", "2. +Uncertainty", "3. +SQI Quality", "4. Full Adaptive"]
+    ax[0].bar(short_names, cf_df["risk_at_coverage"] * 100, color=colors, alpha=0.85)
+    ax[0].set_ylabel("Risk (Error Rate on Accepted %)")
+    ax[0].set_title("Accepted Risk at Calibrated Coverage")
+    ax[0].grid(alpha=0.3, axis="y")
+    plt.setp(ax[0].get_xticklabels(), rotation=15, ha="right", fontsize=9)
+
+    for i, row in cf_df.iterrows():
+        ax[1].scatter(row["coverage"] * 100, row["macro_f1"], color=colors[i], s=120, label=short_names[i], zorder=5)
+    ax[1].set_xlabel("Coverage (%)")
+    ax[1].set_ylabel("Macro-F1 (Accepted Set)")
+    ax[1].set_title("Macro-F1 vs Coverage Trade-off")
+    ax[1].grid(alpha=0.3)
+    ax[1].legend(fontsize=8, loc="lower left")
+    fig.tight_layout()
+    fig.savefig(ctx.p("figures", "exp1_adaptive_abstention.png"), dpi=130)
+    plt.close(fig)
 
 
 def _error_auroc(y, pred, unc):

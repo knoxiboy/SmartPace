@@ -56,6 +56,22 @@ def predict_logits(model, x, device=None, bs=512):
 
 
 @torch.no_grad()
+def extract_features(model, x, device=None, bs=512):
+    """x: np (N,1,L) float32 -> features np (N,D). Deterministic (eval mode)."""
+    device = device or get_device()
+    model = model.to(device).eval()
+    out = []
+    for i in range(0, len(x), bs):
+        batch = torch.from_numpy(x[i:i + bs]).to(device)
+        if hasattr(model, "extract_features"):
+            feat = model.extract_features(batch)
+        else:
+            feat = model(batch)
+        out.append(feat.cpu().numpy())
+    return np.concatenate(out)
+
+
+@torch.no_grad()
 def mc_dropout_probs(model, x, T=20, device=None, bs=512):
     """Monte-Carlo dropout: T stochastic passes with dropout on, BatchNorm in eval mode.
     Returns probs (T, N, C)."""

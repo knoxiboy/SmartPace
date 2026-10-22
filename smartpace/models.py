@@ -42,9 +42,14 @@ class ResNet1D(nn.Module):
         self.drop = nn.Dropout(p_head)
         self.fc = nn.Linear(cin, n_classes)
 
-    def forward(self, x):
+    def extract_features(self, x):
+        """Extract penultimate feature embedding (B, D)."""
         x = self.body(self.stem(x))
-        return self.fc(self.drop(self.pool(x).flatten(1)))
+        return self.pool(x).flatten(1)
+
+    def forward(self, x):
+        feat = self.extract_features(x)
+        return self.fc(self.drop(feat))
 
 
 class CNN1D(nn.Module):
@@ -61,8 +66,12 @@ class CNN1D(nn.Module):
         self.drop = nn.Dropout(p)
         self.fc = nn.Linear(64, n_classes)
 
+    def extract_features(self, x):
+        """Extract penultimate feature embedding (B, 64)."""
+        return self.f(x).flatten(1)
+
     def forward(self, x):
-        return self.fc(self.drop(self.f(x).flatten(1)))
+        return self.fc(self.drop(self.extract_features(x)))
 
 
 class CNNTransformer(nn.Module):
@@ -78,10 +87,14 @@ class CNNTransformer(nn.Module):
         self.drop = nn.Dropout(0.3)
         self.fc = nn.Linear(d, n_classes)
 
-    def forward(self, x):
+    def extract_features(self, x):
+        """Extract penultimate feature embedding (B, d)."""
         z = self.front(x).transpose(1, 2)                  # (B, T, d)
         z = z + self.pos[:, :z.shape[1]]
-        return self.fc(self.drop(self.enc(z).mean(1)))
+        return self.enc(z).mean(1)
+
+    def forward(self, x):
+        return self.fc(self.drop(self.extract_features(x)))
 
 
 ARCHS = {"resnet1d": ResNet1D, "cnn1d": CNN1D, "cnntransformer": CNNTransformer}

@@ -52,7 +52,10 @@ def make_report(out):
 
     section("1. Detection, uncertainty and rejection (remark 1)",
             [("exp1_summary.csv", "MIT-BIH test (inter-patient), mean ± std over seeds"),
-             ("exp1_uncertainty.csv", "Uncertainty methods (ResNet1D)")], figs=["exp1_rejection.png"])
+             ("exp1_uncertainty.csv", "Uncertainty methods (ResNet1D)"),
+             ("exp1_reliability_comparison.csv", "Adaptive Abstention: 4-Configuration Comparison (Signal Quality + Uncertainty + Distribution Shift)"),
+             ("exp1_shift_detector_comparison.csv", "Distribution Shift Detectors: Mahalanobis vs Centroid Baseline")],
+            figs=["exp1_rejection.png", "exp1_adaptive_abstention.png"])
     section("2. Cross-dataset generalisation (remark 2)",
             [("exp2_label_distribution.csv", "Unified-label window counts"),
              ("exp2_summary.csv", "Train / test combinations")], figs=["exp2_confusion.png"])

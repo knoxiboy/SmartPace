@@ -228,3 +228,109 @@ def test_edge_memory_measurement_works(tmp_path):
     p = edge.export_onnx(CNN1D().eval(), str(tmp_path / "m.onnx"))
     r = edge.memory_mb(p)
     assert r["peak_rss_mb"] > 10
+
+
+def test_model_extract_features():
+    from smartpace.models import CNN1D, CNNTransformer, ResNet1D
+    from smartpace.train import extract_features
+    x = np.random.randn(4, 1, 2500).astype(np.float32)
+    for model in [ResNet1D(), CNN1D(), CNNTransformer()]:
+        model.eval()
+        feat = extract_features(model, x)
+        assert feat.shape[0] == 4 and feat.shape[1] > 0
+        logits = model(torch.from_numpy(x))
+        assert logits.shape == (4, C.N_CLASSES)
+
+
+def test_mahalanobis_and_euclidean_shift_detectors():
+    from smartpace.reliability import EuclideanShiftDetector, MahalanobisShiftDetector
+    rng = np.random.default_rng(0)
+    # Generate 3 distinct class clusters in 16-D feature space
+    F_c0 = rng.normal(loc=-2.0, scale=0.5, size=(50, 16))
+    F_c1 = rng.normal(loc=2.0, scale=0.5, size=(50, 16))
+    features = np.vstack([F_c0, F_c1])
+    labels = np.array([0] * 50 + [1] * 50)
+
+    # In-distribution validation samples
+    val_feat = np.vstack([rng.normal(loc=-2.0, scale=0.5, size=(20, 16)),
+                          rng.normal(loc=2.0, scale=0.5, size=(20, 16))])
+
+    # OOD samples far from both clusters
+    ood_feat = rng.normal(loc=15.0, scale=1.0, size=(20, 16))
+
+    # Test Mahalanobis detector
+    mah = MahalanobisShiftDetector().fit(features, labels)
+    tau_mah = mah.calibrate(val_feat, target_coverage=0.90)
+    val_scores = mah.score(val_feat)
+    ood_scores = mah.score(ood_feat)
+
+    assert (val_scores <= tau_mah).mean() >= 0.85
+    assert ood_scores.min() > val_scores.max()
+
+    # Test Euclidean detector
+    euc = EuclideanShiftDetector().fit(features, labels)
+    tau_euc = euc.calibrate(val_feat, target_coverage=0.90)
+    assert euc.score(ood_feat).min() > euc.score(val_feat).max()
+
+
+def test_adaptive_abstention_module_and_four_configurations():
+    from smartpace.preprocess import SQIGate
+    from smartpace.reliability import AdaptiveAbstentionModule, MahalanobisShiftDetector, evaluate_four_configurations
+
+    rng = np.random.default_rng(42)
+    n = 60
+    # Synthetic embeddings, labels, and calibrated probabilities
+    labels = rng.choice([0, 1, 2], size=n)
+    features = rng.normal(loc=labels[:, None] * 3.0, scale=0.5, size=(n, 8))
+    # Probabilities
+    probs = np.full((n, C.N_CLASSES), 0.05, dtype=np.float32)
+    for i in range(n):
+        probs[i, labels[i]] = 0.8
+    # Add some uncertain samples
+    probs[:10] = 1.0 / C.N_CLASSES
+
+    # Synthetic clean SQI features (5 columns)
+    sqi = np.column_stack([np.full(n, 8.0), np.full(n, 0.01), np.full(n, 0.01), np.ones(n), np.zeros(n)])
+    # Make a few samples have bad SQI
+    sqi[45:50, 0] = 0.0 # flat kurtosis
+    sqi[45:50, 4] = 1.0 # flat flag
+
+    sqi_gate = SQIGate().fit(sqi)
+    shift_det = MahalanobisShiftDetector().fit(features, labels)
+    shift_det.calibrate(features, target_coverage=0.95)
+
+    abstention = AdaptiveAbstentionModule(
+        sqi_gate=sqi_gate,
+        shift_detector=shift_det,
+        tau_unc=0.8,
+        tau_shift=shift_det.threshold_,
+    )
+
+    dec = abstention.decide(probs, features, sqi)
+    assert len(dec.action) == n
+    assert "REJECT_QUALITY" in dec.action
+    assert "ABSTAIN_UNCERTAIN" in dec.action
+    assert "ACCEPT" in dec.action
+
+    # Test four configurations evaluation
+    ood_feat = rng.normal(loc=30.0, scale=1.0, size=(20, 8))
+    res = evaluate_four_configurations(
+        y_true=labels,
+        probs=probs,
+        features=features,
+        sqi_features=sqi,
+        abstention_module=abstention,
+        ood_features=ood_feat,
+    )
+
+    assert "1. Baseline Classifier" in res
+    assert "2. Classifier + Uncertainty Gate" in res
+    assert "3. Classifier + Signal Quality Gate" in res
+    assert "4. Full Adaptive Tri-Gate (SmartPace)" in res
+
+    # Baseline coverage must be 1.0
+    assert res["1. Baseline Classifier"]["coverage"] == 1.0
+    # Full Adaptive Tri-Gate must have risk <= baseline risk (or nan if coverage 0)
+    assert res["4. Full Adaptive Tri-Gate (SmartPace)"]["risk_at_coverage"] <= res["1. Baseline Classifier"]["risk_at_coverage"]
+    assert res["4. Full Adaptive Tri-Gate (SmartPace)"]["auroc_ood_detection"] > 0.8
+
