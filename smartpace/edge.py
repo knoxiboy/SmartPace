@@ -20,6 +20,10 @@ import torch
 import torch.nn as nn
 import torch.nn.utils.prune as prune
 
+from scipy.special import softmax
+
+from . import evaluation as E
+from .config import CLASSES, N_CLASSES
 from .train import TrainCfg, get_device
 
 
@@ -215,6 +219,83 @@ def benchmark_file(path, length=2500, threads=1):
     row.update(latency_ms(path, length, threads=threads))
     row.update(memory_mb(path, length, threads))
     return row
+
+
+def evaluate_edge_reliability_and_confidence_shift(
+    fp32_logits: np.ndarray,
+    variant_logits: np.ndarray,
+    y_true: np.ndarray,
+    tau_unc: float = 0.5,
+) -> dict:
+    """Evaluates predictive performance, calibration, confidence distortion, and abstention shifts
+    induced by edge compression (quantization and pruning) relative to the uncompressed FP32 reference.
+    """
+    p_ref = softmax(fp32_logits, axis=1)
+    p_var = softmax(variant_logits, axis=1)
+
+    pred_ref = p_ref.argmax(axis=1)
+    pred_var = p_var.argmax(axis=1)
+
+    conf_ref = p_ref.max(axis=1)
+    conf_var = p_var.max(axis=1)
+
+    y = np.asarray(y_true, dtype=np.int64)
+
+    # 1. Performance
+    f1 = E.macro_f1(y, pred_var)
+    acc = E.accuracy(y, pred_var)
+
+    # Class-wise recall
+    rec_dict = {}
+    for c_idx, c_name in enumerate(CLASSES):
+        m = (y == c_idx)
+        rec_dict[f"recall_{c_name.lower()}"] = float((pred_var[m] == c_idx).mean()) if m.any() else np.nan
+
+    # 2. Calibration & Confidence
+    ece_val = E.ece(p_var, y)
+    brier_val = E.brier(p_var, y)
+    mean_conf = float(conf_var.mean())
+
+    # 3. Confidence Distortion relative to FP32 reference
+    abs_conf_shift = np.abs(conf_var - conf_ref)
+    mean_abs_conf_shift = float(abs_conf_shift.mean())
+    p95_conf_shift = float(np.percentile(abs_conf_shift, 95))
+
+    same_pred_mask = (pred_var == pred_ref)
+    same_pred_ratio = float(same_pred_mask.mean())
+
+    conf_shift_on_same = float(abs_conf_shift[same_pred_mask].mean()) if same_pred_mask.any() else 0.0
+    signed_conf_shift = float((conf_var - conf_ref).mean())
+
+    # 4. Abstention & Rejection Discordance
+    h_ref = E.entropy(p_ref)
+    h_var = E.entropy(p_var)
+
+    rej_ref = h_ref > tau_unc
+    rej_var = h_var > tau_unc
+
+    discordance_rate = float((rej_ref != rej_var).mean())
+
+    acc_mask = ~rej_var
+    cov = float(acc_mask.mean())
+    err_acc = float((pred_var[acc_mask] != y[acc_mask]).mean()) if acc_mask.any() else 0.0
+
+    return {
+        "macro_f1": f1,
+        "accuracy": acc,
+        "ece": ece_val,
+        "brier": brier_val,
+        "mean_confidence": mean_conf,
+        "same_pred_agreement": same_pred_ratio,
+        "mean_abs_conf_shift": mean_abs_conf_shift,
+        "p95_abs_conf_shift": p95_conf_shift,
+        "signed_conf_shift": signed_conf_shift,
+        "conf_shift_on_same_pred": conf_shift_on_same,
+        "abstention_discordance_rate": discordance_rate,
+        "coverage_at_tau": cov,
+        "error_rate_at_tau": err_acc,
+        **rec_dict,
+    }
 
 
 if __name__ == "__main__":                 # python -m smartpace.edge model1.onnx model2.onnx ...

@@ -528,3 +528,35 @@ def test_explanation_stress_testing():
     assert "auroc_combined_warning" in warning_res
 
 
+def test_edge_reliability_and_confidence_shift():
+    from smartpace.edge import evaluate_edge_reliability_and_confidence_shift
+
+    rng = np.random.default_rng(999)
+    n = 40
+    y_true = rng.choice(list(range(C.N_CLASSES)), size=n)
+
+    # Reference logits
+    fp32_logits = rng.normal(size=(n, C.N_CLASSES)).astype(np.float32)
+
+    # Slightly perturbed variant logits
+    variant_logits = fp32_logits + rng.normal(scale=0.1, size=(n, C.N_CLASSES)).astype(np.float32)
+
+    res = evaluate_edge_reliability_and_confidence_shift(
+        fp32_logits=fp32_logits,
+        variant_logits=variant_logits,
+        y_true=y_true,
+        tau_unc=0.8,
+    )
+
+    assert "macro_f1" in res
+    assert "ece" in res
+    assert "brier" in res
+    assert "same_pred_agreement" in res
+    assert "mean_abs_conf_shift" in res
+    assert "abstention_discordance_rate" in res
+    assert "coverage_at_tau" in res
+    assert "recall_nsr" in res
+    assert "recall_pvc" in res
+    assert res["same_pred_agreement"] > 0.5
+
+

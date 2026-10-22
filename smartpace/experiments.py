@@ -901,14 +901,18 @@ def exp5_edge(ctx):
     xtr = ctx.inp(ctx.main, "train")
     Xva = ctx.inp(ctx.main, "val")
     xte, yte = ctx.inp("A", "test"), ctx.split("A", "test")[1]
+    L_in = xte.shape[2]
     sub = np.random.default_rng(0).permutation(len(ytr))[:ctx.a.prune_n]
     ft = lambda: (xtr[sub], ytr[sub], ctx.a.prune_epochs)
     variants, torch_models = {}, {}
-    variants["resnet1d_fp32"] = edge.export_onnx(m, os.path.join(ed, "resnet1d_fp32.onnx")); torch_models["resnet1d_fp32"] = m
+    variants["resnet1d_fp32"] = edge.export_onnx(m, os.path.join(ed, "resnet1d_fp32.onnx"), length=L_in)
+    torch_models["resnet1d_fp32"] = m
     ctrl = edge.prune_model(m, 0.0, finetune=ft())      # control: identical fine-tuning, nothing pruned
     cn = "resnet1d_finetuned_fp32 (control, no pruning)"
-    variants[cn] = edge.export_onnx(ctrl, os.path.join(ed, "resnet1d_finetuned_fp32.onnx")); torch_models[cn] = ctrl
-    variants["cnn1d_fp32 (baseline B1)"] = edge.export_onnx(b1, os.path.join(ed, "cnn1d_fp32.onnx")); torch_models["cnn1d_fp32 (baseline B1)"] = b1
+    variants[cn] = edge.export_onnx(ctrl, os.path.join(ed, "resnet1d_finetuned_fp32.onnx"), length=L_in)
+    torch_models[cn] = ctrl
+    variants["cnn1d_fp32 (baseline B1)"] = edge.export_onnx(b1, os.path.join(ed, "cnn1d_fp32.onnx"), length=L_in)
+    torch_models["cnn1d_fp32 (baseline B1)"] = b1
     try:
         variants["resnet1d_int8"] = edge.quantize_int8(variants["resnet1d_fp32"], os.path.join(ed, "resnet1d_int8.onnx"), Xva)
         torch_models["resnet1d_int8"] = m
@@ -917,25 +921,131 @@ def exp5_edge(ctx):
     for sp in (0.5, 0.8):
         pm = edge.prune_model(m, sp, finetune=ft())
         nm = f"resnet1d_pruned{int(sp * 100)}_fp32"
-        variants[nm] = edge.export_onnx(pm, os.path.join(ed, nm + ".onnx")); torch_models[nm] = pm
-        if True:
-            try:
-                nm2 = f"resnet1d_pruned{int(sp * 100)}_int8"
-                variants[nm2] = edge.quantize_int8(variants[nm], os.path.join(ed, nm2 + ".onnx"), Xva); torch_models[nm2] = pm
-            except Exception as e:                                 # pragma: no cover
-                print("  pruned INT8 failed:", e)
+        variants[nm] = edge.export_onnx(pm, os.path.join(ed, nm + ".onnx"), length=L_in)
+        torch_models[nm] = pm
+        try:
+            nm2 = f"resnet1d_pruned{int(sp * 100)}_int8"
+            variants[nm2] = edge.quantize_int8(variants[nm], os.path.join(ed, nm2 + ".onnx"), Xva)
+            torch_models[nm2] = pm
+        except Exception as e:                                 # pragma: no cover
+            print("  pruned INT8 failed:", e)
     np.savez_compressed(os.path.join(ed, "test_subset.npz"), x=xte[:500], y=yte[:500])   # for the on-device run
-    rows = []
+
+    # Reference uncompressed FP32 logits
+    fp32_logits = edge.onnx_logits(variants["resnet1d_fp32"], xte)
+
+    rows, dist_rows = [], []
     for name, path in variants.items():
         lg = edge.onnx_logits(path, xte)
         st = edge.sparsity_stats(torch_models[name])
-        row = {"variant": name, "macro_f1": E.macro_f1(yte, lg.argmax(1)), "accuracy": E.accuracy(yte, lg.argmax(1)),
-               "params": st["params"], "nonzero_params": st["nonzero_params"], **edge.benchmark_file(path, threads=ctx.a.threads)}
+        bm = edge.benchmark_file(path, length=L_in, threads=ctx.a.threads)
+        rel = edge.evaluate_edge_reliability_and_confidence_shift(fp32_logits, lg, yte, tau_unc=0.5)
+
+        row = {
+            "variant": name,
+            "params": st["params"],
+            "nonzero_params": st["nonzero_params"],
+            "sparsity": st["sparsity"],
+            **bm,
+            **rel,
+        }
         rows.append(row)
-        print(f"  {name:28s} F1 {row['macro_f1']:.4f}  {row['file_mb']:.3f} MB  {row['lat_mean_ms']:.2f} ms  {row['peak_rss_mb']:.0f} MB", flush=True)
-    ctx.save_csv(pd.DataFrame(rows), "exp5_edge.csv")
+
+        dist_row = {
+            "variant": name,
+            "macro_f1": rel["macro_f1"],
+            "ece": rel["ece"],
+            "brier": rel["brier"],
+            "same_pred_agreement": rel["same_pred_agreement"],
+            "mean_abs_conf_shift": rel["mean_abs_conf_shift"],
+            "p95_abs_conf_shift": rel["p95_abs_conf_shift"],
+            "signed_conf_shift": rel["signed_conf_shift"],
+            "conf_shift_on_same_pred": rel["conf_shift_on_same_pred"],
+            "abstention_discordance_rate": rel["abstention_discordance_rate"],
+            "coverage_at_tau": rel["coverage_at_tau"],
+            "error_rate_at_tau": rel["error_rate_at_tau"],
+        }
+        dist_rows.append(dist_row)
+
+        print(f"  {name:28s} F1 {row['macro_f1']:.4f}  ECE {row['ece']:.4f}  "
+              f"Agr {row['same_pred_agreement']*100:.1f}%  DiscAbt {row['abstention_discordance_rate']*100:.1f}%  "
+              f"{row['file_mb']:.3f} MB  {row['lat_mean_ms']:.2f} ms  {row['peak_rss_mb']:.0f} MB", flush=True)
+
+    df_edge = pd.DataFrame(rows)
+    df_dist = pd.DataFrame(dist_rows)
+    ctx.save_csv(df_edge, "exp5_edge.csv")
+    ctx.save_csv(df_dist, "exp5_confidence_distortion.csv")
     with open(ctx.p("results", "hardware.json"), "w") as f:
         json.dump(edge.hardware_info(), f, indent=2)
+
+    # 4-panel reliability-resource tradeoff figure
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+    # Panel 1: Latency vs Macro-F1
+    ax1 = axes[0, 0]
+    for _, r in df_edge.iterrows():
+        lbl = r["variant"].replace("resnet1d_", "").replace(" (baseline B1)", "").replace(" (control, no pruning)", "")
+        ax1.scatter(r["lat_mean_ms"], r["macro_f1"], s=100, zorder=3)
+        ax1.annotate(lbl, (r["lat_mean_ms"], r["macro_f1"]), textcoords="offset points", xytext=(5, 5), fontsize=8)
+    ax1.axvline(50, color="gray", linestyle="--", alpha=0.6, label="50ms Pacemaker Budget")
+    ax1.set_xlabel("Mean Inference Latency (ms / 10s window)")
+    ax1.set_ylabel("Macro-F1 Score")
+    ax1.set_title("A. Latency vs. Diagnostic Performance", fontweight="bold")
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(loc="lower left", fontsize=8)
+
+    # Panel 2: Compressed Size vs Calibration Error (ECE)
+    ax2 = axes[0, 1]
+    for _, r in df_edge.iterrows():
+        lbl = r["variant"].replace("resnet1d_", "").replace(" (baseline B1)", "").replace(" (control, no pruning)", "")
+        ax2.scatter(r["gzip_mb"] * 1024, r["ece"], s=100, zorder=3)
+        ax2.annotate(lbl, (r["gzip_mb"] * 1024, r["ece"]), textcoords="offset points", xytext=(5, 5), fontsize=8)
+    ax2.set_xlabel("Gzip Compressed Footprint (KB)")
+    ax2.set_ylabel("Expected Calibration Error (ECE)")
+    ax2.set_title("B. Model Footprint vs. Calibration Error", fontweight="bold")
+    ax2.grid(True, alpha=0.3)
+
+    # Panel 3: Confidence Shift and Abstention Discordance
+    ax3 = axes[1, 0]
+    df_comp = df_edge[~df_edge["variant"].str.contains("resnet1d_fp32")].copy()
+    if len(df_comp) > 0:
+        short_names = [v.replace("resnet1d_", "").replace(" (baseline B1)", "").replace(" (control, no pruning)", "") for v in df_comp["variant"]]
+        x_idx = np.arange(len(short_names))
+        width = 0.35
+        ax3.bar(x_idx - width/2, df_comp["mean_abs_conf_shift"] * 100, width, label="Mean |Δ Conf| (%)", color="#3b82f6", alpha=0.85)
+        ax3.bar(x_idx + width/2, df_comp["p95_abs_conf_shift"] * 100, width, label="95th Pct |Δ Conf| (%)", color="#ef4444", alpha=0.85)
+        ax3.set_xticks(x_idx)
+        ax3.set_xticklabels(short_names, rotation=25, ha="right", fontsize=8)
+        ax3.set_ylabel("Confidence Shift (%)")
+        ax3.set_title("C. Edge Confidence Distortion vs. FP32 Reference", fontweight="bold")
+        ax3.grid(True, alpha=0.3, axis="y")
+        ax3.legend(loc="upper left", fontsize=8)
+
+        ax3_twin = ax3.twinx()
+        ax3_twin.plot(x_idx, df_comp["abstention_discordance_rate"] * 100, color="#10b981", marker="o", linewidth=2, label="Abstention Discordance (%)")
+        ax3_twin.set_ylabel("Abstention Discordance (%)", color="#10b981")
+        ax3_twin.tick_params(axis="y", labelcolor="#10b981")
+        ax3_twin.legend(loc="upper right", fontsize=8)
+
+    # Panel 4: Per-Class Recall Retention
+    ax4 = axes[1, 1]
+    classes = [c.lower() for c in C.CLASSES]
+    rec_cols = [f"recall_{c}" for c in classes if f"recall_{c}" in df_edge.columns]
+    for _, r in df_edge.iterrows():
+        lbl = r["variant"].replace("resnet1d_", "").replace(" (baseline B1)", "").replace(" (control, no pruning)", "")
+        vals = [r[col] for col in rec_cols]
+        ax4.plot([c.upper() for c in classes], vals, marker="s", label=lbl, alpha=0.85)
+    ax4.set_xlabel("Rhythm Diagnostic Class")
+    ax4.set_ylabel("Sensitivity / Recall")
+    ax4.set_ylim(0.0, 1.05)
+    ax4.set_title("D. Class-wise Diagnostic Sensitivity Retention", fontweight="bold")
+    ax4.grid(True, alpha=0.3)
+    ax4.legend(loc="lower left", fontsize=7)
+
+    fig.tight_layout()
+    fig.savefig(ctx.p("figures", "exp5_reliability_resource_tradeoff.png"), dpi=130)
+    plt.close(fig)
+    print("EXP5 completed successfully.", flush=True)
 
 
 # ============================================================================= exp6

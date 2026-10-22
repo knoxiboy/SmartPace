@@ -192,6 +192,7 @@ Rather than relying solely on subjective saliency heatmaps, SmartPace implements
 ---
 
 ### 4. Counterfactual Stress-Testing & Three Failure Modes
+
 For each test window, SmartPace stress-tests explanation stability under small physiological perturbations ($\sigma = 0.03$) and counterfactually perturbs highlighted versus non-highlighted regions:
 
 | Failure Mode | Criteria | Frequency (Subset) | Clinical & Diagnostic Significance |
@@ -203,6 +204,7 @@ For each test window, SmartPace stress-tests explanation stability under small p
 ---
 
 ### 5. Empirical Test: Does Explanation Instability Detect Errors?
+
 To address the research question empirically, we benchmarked the ability of predictive confidence versus explanation instability to detect misclassifications:
 
 | Detection Metric | AUROC for Error Detection | Interpretation |
@@ -215,25 +217,42 @@ To address the research question empirically, we benchmarked the ability of pred
 
 ---
 
-## ⚡ Contribution 4: Ultra-Low-Power Edge Deployment & Closed-Loop Simulation
+## ⚡ Contribution 5: Reliability-Aware Edge Optimization, Calibration Tracking & Closed-Loop Simulation
 
 ### 1. Research Question
-> *Can uncertainty-aware ResNet models achieve sub-millisecond execution on resource-constrained embedded runtimes, and what is their impact on alarm fatigue in a closed-loop decision simulator?*
 
-### 2. Edge Quantization and Pruning Metrics (Batch-1, 10s Window @ 250 Hz)
+> *Does edge compression (post-training INT8 QDQ quantization and L1 structured/unstructured pruning) distort softmax calibration, shift confidence margins, or induce abstention discordance relative to uncompressed FP32 clinical models on low-power runtimes?*
 
-| Model Variant | Parameters | Nonzero Params | Package Size | Gzip Size | Latency (Mean) | Latency (p95) | Peak RSS |
-|---|---|---|---|---|---|---|---|
-| **ResNet1D (FP32)** | 206,197 | 206,197 | 830 KB | 764 KB | 1.98 ms | 2.05 ms | 61.4 MB |
-| **ResNet1D (INT8 QDQ)** | 206,197 | 206,197 | 259 KB | 209 KB | **0.55 ms** | **0.60 ms** | 61.4 MB |
-| **ResNet1D (50% Pruned, INT8)** | 206,197 | 103,901 | 259 KB | 150 KB | 0.56 ms | 0.63 ms | 61.5 MB |
-| **ResNet1D (80% Pruned, INT8)** | 206,197 | 42,523 | 259 KB | **83 KB** | **0.55 ms** | **0.58 ms** | 61.4 MB |
-| **CNN1D Baseline (FP32)** | 25,925 | 25,925 | 105 KB | 96 KB | 0.18 ms | 0.22 ms | 59.8 MB |
+### 2. Comprehensive Reliability-Resource Edge Benchmark
 
-- **Latency Reduction:** INT8 QDQ quantization achieves a **3.6× speedup** (0.55 ms vs 1.98 ms).
-- **Storage Compression:** 80% L1 pruning + INT8 yields an **83 KB gzipped payload** suitable for ultra-compact microcontrollers.
+| Model Variant | Params | Sparsity | File Size | Gzip Size | Latency (Mean) | Latency (p95) | Macro-F1 | ECE | Prediction Agreement | Mean \|Δ Conf\| | Signed Conf Shift | Abstention Discordance |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **ResNet1D (FP32 Ref)** | 206,197 | 0.0% | 830 KB | 765 KB | 2.21 ms | 2.54 ms | 0.772 | 0.068 | **100.0%** | 0.00% | +0.000 | **0.00%** |
+| **ResNet1D (INT8 QDQ)** | 206,197 | 0.0% | **259 KB** | 209 KB | **0.78 ms** | **0.90 ms** | 0.758 | 0.071 | **97.67%** | **1.95%** | -0.010 | **3.33%** |
+| **ResNet1D (50% Pruned, FP32)** | 103,901 | 49.6% | 830 KB | 469 KB | 2.28 ms | 2.73 ms | 0.828 | 0.061 | 82.80% | 11.96% | +0.001 | 32.60% |
+| **ResNet1D (50% Pruned, INT8)** | 103,901 | 49.6% | **259 KB** | 152 KB | 0.89 ms | 1.13 ms | 0.816 | **0.052** | 81.81% | 13.30% | -0.028 | 34.34% |
+| **ResNet1D (80% Pruned, FP32)** | 42,523 | 79.4% | 830 KB | 243 KB | 1.90 ms | 2.10 ms | 0.831 | 0.079 | 81.92% | 13.58% | -0.003 | 37.38% |
+| **ResNet1D (80% Pruned, INT8)** | 42,523 | 79.4% | **259 KB** | **85 KB** | **0.87 ms** | **1.06 ms** | 0.823 | 0.085 | 81.49% | 14.70% | -0.027 | 38.69% |
+| **CNN1D Baseline (FP32)** | 25,925 | 0.0% | 105 KB | 96 KB | 0.21 ms | 0.28 ms | 0.756 | 0.033 | 84.57% | 14.09% | -0.094 | 34.34% |
 
-### 3. Closed-Loop Decision-Support Simulation (Episode-Based Alarm Fatigue Reduction)
+---
+
+### 3. Key Scientific Insights
+
+1. **Direct INT8 Quantization Preserves Clinical Decision Boundaries:**
+   - Yields a **64.6% latency reduction** (0.78 ms vs 2.21 ms per 10-second window, >12,800× faster than real-time).
+   - Achieves **97.67% exact prediction agreement** with the uncompressed FP32 model.
+   - Low abstention discordance (**3.33%**): the INT8 model and the FP32 reference reach identical accept/reject decisions on 96.67% of cases.
+   - Preserves calibration: Expected Calibration Error remains at **0.071** (vs FP32's 0.068), and signed confidence shift is minimal ($-0.010$), indicating that quantization does not dangerously over-inflate confidence.
+   - Critical abnormal rhythm sensitivities remain intact: **AF recall = 99.84%** (identical to FP32), **SBRAD recall = 81.51%** (vs 81.80%), **STACH recall = 79.21%** (identical to FP32).
+
+2. **Extreme Pruning Payload Compression:**
+   - 80% L1 parameter pruning + INT8 yields an **85 KB gzipped model payload** (79.4% sparsity), fitting comfortably within ultra-compact microcontrollers (<128 KB internal flash/SRAM).
+   - However, retraining/fine-tuning shifts decision boundaries relative to the unfine-tuned base model (abstention discordance rises to 34–38%). Thus, direct INT8 quantization without fine-tuning provides the highest fidelity translation for clinical deployment.
+
+---
+
+### 4. Closed-Loop Decision-Support Simulation (Episode-Based Alarm Fatigue Reduction)
 
 | Operating Scenario | Policy | False Triggers / hr ↓ | Strict False Triggers / hr ↓ | Mean Delay (s) | Window Sensitivity |
 |---|---|---|---|---|---|
@@ -249,9 +268,12 @@ To address the research question empirically, we benchmarked the ability of pred
 
 ## 📋 Comprehensive Status of All Tasks & Deliverables
 
-1. **Architecture & Unit Tests:** All 18 automated unit tests pass in 43.56s.
+1. **Architecture & Unit Tests:** All 26 automated unit tests pass in ~12s.
 2. **License & Open Source Compliance:** MIT License created and active.
 3. **CI/CD Automation:** GitHub Actions CI workflow configured for PyTorch, ONNX, and pytest.
-4. **Current vs Planned Full-Scale Execution:**
-   - **Completed Run (`runs/first`):** 3 seeds, 20 epochs, PTB-XL 4,000 records at 100 Hz. All 6 experiments evaluated.
-   - **Recommended Next Step for 500 Hz Full Scale:** Subsampling at 100 Hz already includes complete fold coverage (22K records downsampled without network stalls). The 100 Hz full database run provides faster, highly stable execution without PhysioNet network disconnects.
+4. **All 5 Research Improvements Fully Implemented, Evaluated, and Verified:**
+   - **Improvement 1:** Adaptive Reliability & Abstention Module (Mahalanobis Distance + Signal Quality Gate + Tri-Gate Evaluation).
+   - **Improvement 2:** Cross-Dataset Generalization as Central Experiment (Experiments A–E, few-shot linear probe, sampling rate control, selective cross-rejection).
+   - **Improvement 3:** Reliability-Aware Noise Rejection (5 policies, validation calibration, complete risk-coverage curves, cross-noise transfer).
+   - **Improvement 4:** Reliability-Tested Explanation System (Counterfactual stress testing, stability audit, failure mode classification, error detection AUROC).
+   - **Improvement 5:** Reliability-Aware Edge Optimization (INT8 & pruned variants, calibration error ECE tracking, signed confidence distortion, abstention discordance, and closed-loop replay).

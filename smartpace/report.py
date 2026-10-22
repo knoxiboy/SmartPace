@@ -83,8 +83,12 @@ def make_report(out):
             figs=["exp4_noise.png", "exp4_rejection_rate.png", "exp4_tradeoff_curves.png", "exp4_noise_type_rejection.png"],
             note="Improvement 3 compares 5 abstention policies (SQI-only, Uncertainty-only, Fixed Dual-Gate, Val-Calibrated Dual Gate, "
                  "and Adaptive Reliability Policy) across complete risk-coverage trade-off curves, abnormal rhythm sensitivity, and cross-noise transfer.")
-    section("5. Edge model benchmark (remark 5)", [("exp5_edge.csv", "FP32 vs INT8 vs pruned")],
-            note="Hardware: see results/hardware.json. Latency is batch-1 per 10-s window.")
+    section("5. Edge model benchmark (remark 5 & Improvement 5)",
+            [("exp5_edge.csv", "FP32 vs INT8 vs Pruned Performance and Resource Profile"),
+             ("exp5_confidence_distortion.csv", "Edge Calibration and Confidence Distortion Analysis")],
+            figs=["exp5_reliability_resource_tradeoff.png"],
+            note="Improvement 5 evaluates the reliability-resource trade-off: latency, file size, and peak memory "
+                 "benchmarked against calibration (ECE, Brier score), signed confidence distortion, and abstention discordance.")
     section("6. SIMULATED decision support (remark 6)", [("exp6_simulator.csv", "Policy comparison")],
             note="False triggers are counted as events per hour of replayed recording; delay is the time from "
                  "episode start to the first correct simulated action.", figs=["exp6_timeline.png"])
