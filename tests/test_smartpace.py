@@ -388,3 +388,95 @@ def test_sampling_rate_control_and_cross_rejection():
     assert "macro_f1" in curves[0]
 
 
+def test_noise_rejection_policies():
+    from smartpace.noise_policy import (
+        AdaptiveReliabilityPolicy,
+        FixedDualGatePolicy,
+        SQIOnlyPolicy,
+        UncertaintyOnlyPolicy,
+        ValCalibratedDualGatePolicy,
+        compute_sqi_degradation_index,
+        evaluate_noise_type_breakdown,
+        evaluate_policy_operating_point,
+        generate_tradeoff_curve,
+    )
+    from smartpace.preprocess import SQIGate
+
+    rng = np.random.default_rng(42)
+    n = 60
+    # Dummy SQI features: [kurt, hf_ratio, bw_ratio, rr_valid, flat]
+    clean_sqi = np.column_stack([
+        rng.uniform(3.0, 6.0, size=n),
+        rng.uniform(0.01, 0.05, size=n),
+        rng.uniform(0.01, 0.05, size=n),
+        np.ones(n),
+        np.zeros(n),
+    ]).astype(np.float32)
+
+    noisy_sqi = np.column_stack([
+        rng.uniform(0.5, 2.0, size=n),
+        rng.uniform(0.2, 0.8, size=n),
+        rng.uniform(0.1, 0.6, size=n),
+        rng.uniform(0.0, 0.5, size=n),
+        rng.choice([0.0, 1.0], size=n, p=[0.8, 0.2]),
+    ]).astype(np.float32)
+
+    deg = compute_sqi_degradation_index(noisy_sqi, clean_sqi)
+    assert deg.shape == (n,)
+    assert (deg >= 0.0).all() and (deg <= 1.0).all()
+
+    # Probabilities
+    probs = rng.uniform(0.01, 1.0, size=(n, C.N_CLASSES))
+    probs /= probs.sum(axis=1, keepdims=True)
+    y_true = rng.choice(list(range(C.N_CLASSES)), size=n)
+
+    # 1. SQI Only Policy
+    sqi_pol = SQIOnlyPolicy(clean_sqi)
+    sqi_scores = sqi_pol.score_unreliability(probs, noisy_sqi)
+    assert sqi_scores.shape == (n,)
+
+    # 2. Uncertainty Only Policy
+    unc_pol = UncertaintyOnlyPolicy()
+    unc_scores = unc_pol.score_unreliability(probs, noisy_sqi)
+    assert unc_scores.shape == (n,)
+
+    # 3. Fixed Dual Gate Policy
+    sqi_gate = SQIGate(q=5.0).fit(clean_sqi)
+    fixed_pol = FixedDualGatePolicy(sqi_gate, tau_unc=1.0)
+    fixed_rejs = fixed_pol.decide(probs, noisy_sqi)
+    assert fixed_rejs.shape == (n,)
+    assert fixed_rejs.dtype == bool
+
+    # 4. Validation-Calibrated Policy
+    val_pol = ValCalibratedDualGatePolicy(clean_sqi)
+    val_pol.calibrate_for_coverage(probs, noisy_sqi, target_coverage=0.7)
+    val_rejs = val_pol.decide(probs, noisy_sqi)
+    assert val_rejs.shape == (n,)
+
+    # 5. Adaptive Reliability Policy
+    adapt_pol = AdaptiveReliabilityPolicy(clean_sqi)
+    adapt_scores = adapt_pol.score_unreliability(probs, noisy_sqi)
+    assert adapt_scores.shape == (n,)
+
+    # Tradeoff curve generation
+    tradeoff = generate_tradeoff_curve(
+        adapt_pol,
+        probs,
+        noisy_sqi,
+        y_true,
+        target_coverages=[0.5, 0.8, 1.0],
+    )
+    assert len(tradeoff) == 3
+    assert "error_rate" in tradeoff[0]
+    assert "abnormal_recall" in tradeoff[0]
+    assert "arrhythmia_fn_rate" in tradeoff[0]
+
+    # Noise breakdown evaluation
+    noise_kinds = np.array(["bw"] * 20 + ["em"] * 20 + ["ma"] * 20)
+    snrs = np.array([12] * 30 + [-6] * 30)
+    breakdown = evaluate_noise_type_breakdown(adapt_pol, probs, noisy_sqi, noise_kinds, snrs, target_coverage=0.7)
+    assert len(breakdown) > 0
+    assert "noise_kind" in breakdown[0]
+    assert "rejection_rate" in breakdown[0]
+
+

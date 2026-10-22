@@ -71,8 +71,14 @@ def make_report(out):
     if os.path.exists(ex):
         s = json.load(open(ex, encoding="utf-8"))["summary"]
         L += ["**Explanation metrics**", "", "```", json.dumps(s, indent=1), "```", ""]
-    section("4. Noise robustness and rejection (remark 4)", [("exp4_noise.csv", "Performance vs. noise type and SNR")],
-            figs=["exp4_noise.png", "exp4_rejection_rate.png"])
+    section("4. Noise robustness and rejection (remark 4 & Improvement 3)",
+            [("exp4_noise.csv", "Performance vs. noise type and SNR"),
+             ("exp4_tradeoff_curves.csv", "5-Policy Risk-Coverage and Macro-F1 Trade-off Curves"),
+             ("exp4_noise_type_rejection.csv", "Rejection Rates across Noise Types and SNR Levels"),
+             ("exp4_cross_noise_transfer.csv", "Cross-Noise Transfer Generalization Evaluation")],
+            figs=["exp4_noise.png", "exp4_rejection_rate.png", "exp4_tradeoff_curves.png", "exp4_noise_type_rejection.png"],
+            note="Improvement 3 compares 5 abstention policies (SQI-only, Uncertainty-only, Fixed Dual-Gate, Val-Calibrated Dual Gate, "
+                 "and Adaptive Reliability Policy) across complete risk-coverage trade-off curves, abnormal rhythm sensitivity, and cross-noise transfer.")
     section("5. Edge model benchmark (remark 5)", [("exp5_edge.csv", "FP32 vs INT8 vs pruned")],
             note="Hardware: see results/hardware.json. Latency is batch-1 per 10-s window.")
     section("6. SIMULATED decision support (remark 6)", [("exp6_simulator.csv", "Policy comparison")],

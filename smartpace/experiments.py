@@ -26,6 +26,10 @@ from .adaptation import (adapt_linear_probe, evaluate_cross_dataset_rejection,
                           evaluate_sampling_rate_control)
 from .datasets import get_split, load_dataset, merge, class_counts
 from .noise import NoiseBank, download_nstdb
+from .noise_policy import (AdaptiveReliabilityPolicy, FixedDualGatePolicy, SQIOnlyPolicy,
+                           UncertaintyOnlyPolicy, ValCalibratedDualGatePolicy,
+                           compute_sqi_degradation_index, evaluate_noise_type_breakdown,
+                           evaluate_policy_operating_point, generate_tradeoff_curve)
 from .preprocess import SQIGate, feature_matrix, prepare_input, sqi_features
 from .reliability import (AdaptiveAbstentionModule, EuclideanShiftDetector, MahalanobisShiftDetector,
                           evaluate_four_configurations)
@@ -570,15 +574,34 @@ def exp4_noise(ctx):
     gate, tau = ctx.gate(), ctx.tau_unc()
     conds = [("clean", None, np.nan)] + [(k, k, s) for k in C.NOISE_KINDS for s in C.SNR_LEVELS]
     rows = []
+
+    # Collectors for trade-off curve generation across full test noise set
+    coll_p = []
+    coll_ys = []
+    coll_sqi = []
+    coll_noise_kind = []
+    coll_snr = []
+    coll_is_clean = []
+
     for name, kind, snr in conds:
         Xn = Xr if kind is None else ctx.noise.corrupt(Xr, kind, snr, np.random.default_rng(7), part="test")
         x = prepare_input(Xn, True)
         p = ctx.ens_probs(ms, x)
         pred = p.argmax(1)
+        sqi_f = sqi_features(Xn)
         unc_rej = E.entropy(p) > tau
-        q_rej = gate.flag(sqi_features(Xn))
+        q_rej = gate.flag(sqi_f)
         rej = unc_rej | q_rej
         rs = E.reject_stats(ys, pred, rej)
+
+        # Collect for aggregate trade-off analysis
+        coll_p.append(p)
+        coll_ys.append(ys)
+        coll_sqi.append(sqi_f)
+        coll_noise_kind.extend([name if kind is not None else "clean"] * len(ys))
+        coll_snr.extend([snr] * len(ys))
+        coll_is_clean.extend([kind is None] * len(ys))
+
         rows.append({"noise": name, "snr_db": snr,
                      "macro_f1_resnet_ens": E.macro_f1(ys, pred),
                      "macro_f1_resnet_seed0": E.macro_f1(ys, predict_logits(ms[0], x).argmax(1)),
@@ -591,6 +614,7 @@ def exp4_noise(ctx):
                      "acc_rejected": rs["acc_rejected"], "acc_all": E.accuracy(ys, pred)})
         print(f"  {name:6s} snr {snr:>5}: F1 {rows[-1]['macro_f1_resnet_ens']:.3f}  "
               f"F1(accepted) {rs['f1_accepted']:.3f}  reject {rs['reject_rate']:.2f}", flush=True)
+
     df = ctx.save_csv(pd.DataFrame(rows), "exp4_noise.csv")
     fig, ax = plt.subplots(1, 3, figsize=(13, 3.6), sharey=True)
     clean = df[df.noise == "clean"].iloc[0]
@@ -605,6 +629,7 @@ def exp4_noise(ctx):
         a_.set_title(C.NOISE_NAMES[k]); a_.set_xlabel("SNR (dB)"); a_.invert_xaxis(); a_.grid(alpha=.3)
     ax[0].set_ylabel("macro-F1"); ax[0].legend(fontsize=6)
     fig.tight_layout(); fig.savefig(ctx.p("figures", "exp4_noise.png"), dpi=130); plt.close(fig)
+
     fig, ax = plt.subplots(figsize=(5, 3.4))
     for k in C.NOISE_KINDS:
         g = df[df.noise == k].sort_values("snr_db")
@@ -612,6 +637,172 @@ def exp4_noise(ctx):
     ax.axhline(clean.reject_rate, color="gray", ls=":", label="clean")
     ax.set_xlabel("SNR (dB)"); ax.set_ylabel("rejection rate"); ax.invert_xaxis(); ax.legend(fontsize=7); ax.grid(alpha=.3)
     fig.tight_layout(); fig.savefig(ctx.p("figures", "exp4_rejection_rate.png"), dpi=130); plt.close(fig)
+
+    # -----------------------------------------------------------------------------
+    # Improvement 3: Five-Policy Trade-Off Curves & Validation Calibration
+    # -----------------------------------------------------------------------------
+    print("\n--- Improvement 3: Rejection Policy Trade-off Analysis ---", flush=True)
+    all_p = np.concatenate(coll_p, axis=0)
+    all_ys = np.concatenate(coll_ys, axis=0)
+    all_sqi = np.concatenate(coll_sqi, axis=0)
+    all_noise_kind = np.array(coll_noise_kind)
+    all_snr = np.array(coll_snr)
+    clean_mask = np.array(coll_is_clean)
+
+    # Clean validation baseline & corrupted validation calibration set
+    Xva_raw, yva, _, _ = ctx.split(ctx.main, "val")
+    sqi_clean_val = sqi_features(Xva_raw)
+    rng_v = np.random.default_rng(42)
+    # Calibrate on validation set with realistic noise
+    Xva_noisy = ctx.noise.corrupt_mixed(Xva_raw, rng_v, snr_range=(-6, 24), part="train")
+    sqi_val_noisy = sqi_features(Xva_noisy)
+    p_va = ctx.ens_probs(ms, prepare_input(Xva_noisy, True))
+
+    # Initialize the 5 policies
+    policies = {
+        "1. SQI Gate Only": SQIOnlyPolicy(sqi_clean_val),
+        "2. Uncertainty Gate Only": UncertaintyOnlyPolicy(),
+        "3. Fixed Dual-Gate (Baseline)": FixedDualGatePolicy(gate, tau),
+        "4. Val-Calibrated Dual Gate": ValCalibratedDualGatePolicy(sqi_clean_val),
+        "5. Adaptive Reliability Policy (SmartPace)": AdaptiveReliabilityPolicy(sqi_clean_val),
+    }
+
+    # Calibrate Policy 4 on validation data for 80% coverage target
+    policies["4. Val-Calibrated Dual Gate"].calibrate_for_coverage(p_va, sqi_val_noisy, target_coverage=0.80)
+
+    target_coverages = [0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 1.0]
+    tradeoff_rows = []
+
+    for pol_name, policy in policies.items():
+        curve = generate_tradeoff_curve(
+            policy=policy,
+            probs=all_p,
+            sqi_feats=all_sqi,
+            y_true=all_ys,
+            clean_mask=clean_mask,
+            target_coverages=target_coverages,
+        )
+        for r in curve:
+            r["policy"] = pol_name
+            tradeoff_rows.append(r)
+
+    df_tradeoff = ctx.save_csv(pd.DataFrame(tradeoff_rows), "exp4_tradeoff_curves.csv")
+
+    # Plot 3-panel figure: Coverage vs Macro-F1, Error Rate, and Abnormal Recall
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.2))
+    colors = {"1. SQI Gate Only": "#7f7f7f",
+              "2. Uncertainty Gate Only": "#ff7f0e",
+              "3. Fixed Dual-Gate (Baseline)": "#1f77b4",
+              "4. Val-Calibrated Dual Gate": "#2ca02c",
+              "5. Adaptive Reliability Policy (SmartPace)": "#d62728"}
+    markers = {"1. SQI Gate Only": "x", "2. Uncertainty Gate Only": "^",
+               "3. Fixed Dual-Gate (Baseline)": "s", "4. Val-Calibrated Dual Gate": "d",
+               "5. Adaptive Reliability Policy (SmartPace)": "o"}
+
+    for pol_name, grp in df_tradeoff.groupby("policy"):
+        c = colors.get(pol_name, "black")
+        m = markers.get(pol_name, "o")
+        lw = 2.2 if "Adaptive" in pol_name else 1.2
+        # Panel A: Coverage vs Macro-F1
+        axes[0].plot(grp.actual_coverage, grp.macro_f1, marker=m, color=c, lw=lw, label=pol_name)
+        # Panel B: Coverage vs Error Rate (Risk-Coverage)
+        axes[1].plot(grp.actual_coverage, grp.error_rate, marker=m, color=c, lw=lw, label=pol_name)
+        # Panel C: Coverage vs Abnormal Rhythm Recall
+        axes[2].plot(grp.actual_coverage, grp.abnormal_recall, marker=m, color=c, lw=lw, label=pol_name)
+
+    axes[0].set_title("Coverage vs. Macro-F1 (Higher is Better)")
+    axes[0].set_xlabel("Accepted Coverage")
+    axes[0].set_ylabel("Macro-F1")
+    axes[0].grid(alpha=0.3)
+    axes[0].legend(fontsize=7)
+
+    axes[1].set_title("Risk-Coverage: Error Rate (Lower is Better)")
+    axes[1].set_xlabel("Accepted Coverage")
+    axes[1].set_ylabel("Error Rate on Accepted ECGs")
+    axes[1].grid(alpha=0.3)
+
+    axes[2].set_title("Abnormal Rhythm Sensitivity (Safety)")
+    axes[2].set_xlabel("Accepted Coverage")
+    axes[2].set_ylabel("Abnormal Class Recall (SBRAD/STACH/AF/PVC)")
+    axes[2].grid(alpha=0.3)
+
+    fig.tight_layout()
+    fig.savefig(ctx.p("figures", "exp4_tradeoff_curves.png"), dpi=130)
+    plt.close(fig)
+
+    # -----------------------------------------------------------------------------
+    # Noise-Type Rejection Breakdown across SNRs
+    # -----------------------------------------------------------------------------
+    breakdown_rows = []
+    for pol_name in ["3. Fixed Dual-Gate (Baseline)", "4. Val-Calibrated Dual Gate", "5. Adaptive Reliability Policy (SmartPace)"]:
+        pol = policies[pol_name]
+        b_res = evaluate_noise_type_breakdown(pol, all_p, all_sqi, all_noise_kind, all_snr, target_coverage=0.80)
+        for br in b_res:
+            br["policy"] = pol_name
+            breakdown_rows.append(br)
+
+    df_breakdown = ctx.save_csv(pd.DataFrame(breakdown_rows), "exp4_noise_type_rejection.csv")
+
+    # Plot Rejection Rate across noise types and SNR
+    fig, axes = plt.subplots(1, 3, figsize=(14, 3.8), sharey=True)
+    for ax_idx, k in enumerate(C.NOISE_KINDS):
+        ax = axes[ax_idx]
+        for pol_name in ["3. Fixed Dual-Gate (Baseline)", "4. Val-Calibrated Dual Gate", "5. Adaptive Reliability Policy (SmartPace)"]:
+            sub = df_breakdown[(df_breakdown.policy == pol_name) & (df_breakdown.noise_kind == k)].sort_values("snr_db")
+            ax.plot(sub.snr_db, sub.rejection_rate, marker=markers.get(pol_name, "o"),
+                    color=colors.get(pol_name, "black"), label=pol_name)
+        ax.set_title(f"Rejection on {C.NOISE_NAMES[k]}")
+        ax.set_xlabel("SNR (dB)")
+        ax.invert_xaxis()
+        ax.grid(alpha=0.3)
+    axes[0].set_ylabel("Rejection Rate")
+    axes[0].legend(fontsize=7)
+    fig.tight_layout()
+    fig.savefig(ctx.p("figures", "exp4_noise_type_rejection.png"), dpi=130)
+    plt.close(fig)
+
+    # -----------------------------------------------------------------------------
+    # Cross-Noise Transfer Generalization
+    # -----------------------------------------------------------------------------
+    print("--- Evaluating Cross-Noise Transfer Generalization ---", flush=True)
+    transfer_rows = []
+    # Test transferring policy calibrated on MA or EM to other noise types
+    for source_noise in ["ma", "em"]:
+        # Calibrate adaptive policy on source noise type validation data
+        Xva_src = ctx.noise.corrupt(Xva_raw, source_noise, snr_db=6, rng=rng_v, part="train")
+        sqi_va_src = sqi_features(Xva_src)
+        p_va_src = ctx.ens_probs(ms, prepare_input(Xva_src, True))
+
+        adapt_transfer = AdaptiveReliabilityPolicy(sqi_clean_val)
+        scores_va = adapt_transfer.score_unreliability(p_va_src, sqi_va_src)
+        transfer_thr = float(np.quantile(scores_va, 0.80))  # target 80% coverage on source noise
+
+        # Evaluate on each target noise kind in test data
+        for target_noise in C.NOISE_KINDS:
+            tgt_mask = (all_noise_kind == target_noise)
+            if not tgt_mask.any():
+                continue
+            p_tgt = all_p[tgt_mask]
+            y_tgt = all_ys[tgt_mask]
+            sqi_tgt = all_sqi[tgt_mask]
+
+            rejs = adapt_transfer.decide(p_tgt, sqi_tgt, threshold=transfer_thr)
+            res = evaluate_policy_operating_point(y_tgt, p_tgt, rejs)
+            transfer_rows.append({
+                "calibrated_on": source_noise,
+                "tested_on": target_noise,
+                "target_noise_name": C.NOISE_NAMES[target_noise],
+                "achieved_coverage": res.coverage,
+                "error_rate": res.error_rate,
+                "macro_f1": res.macro_f1,
+                "abnormal_recall": res.abnormal_recall,
+                "arrhythmia_fn_rate": res.arrhythmia_fn_rate,
+            })
+            print(f"  Calibrated on {source_noise.upper():2s} -> Tested on {target_noise.upper():2s}: "
+                  f"Coverage={res.coverage:.2f}, Error={res.error_rate:.3f}, F1={res.macro_f1:.3f}", flush=True)
+
+    ctx.save_csv(pd.DataFrame(transfer_rows), "exp4_cross_noise_transfer.csv")
+    print("EXP4 completed successfully.", flush=True)
 
 
 # ============================================================================= exp5
