@@ -3,13 +3,14 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch 2.1+](https://img.shields.io/badge/PyTorch-2.1+-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![ONNX Runtime](https://img.shields.io/badge/ONNX_Runtime-1.17+-005CED?logo=onnx&logoColor=white)](https://onnxruntime.ai/)
-[![Tests Passing](https://img.shields.io/badge/Tests-18%20Passed-brightgreen)](tests/test_smartpace.py)
+[![Tests Passing](https://img.shields.io/badge/Tests-35%20Passed-brightgreen)](tests/)
+[![Web Platform](https://img.shields.io/badge/SmartPace_Live-FastAPI%20%2B%20React-10b981?logo=react&logoColor=white)](backend/)
 [![PhysioNet Compatible](https://img.shields.io/badge/PhysioNet-MIT--BIH%20%7C%20PTB--XL%20%7C%20NSTDB-008080)](https://physionet.org/)
 [![Edge Latency](https://img.shields.io/badge/Edge_Inference-0.55ms_%2F_INT8-success)](smartpace/edge.py)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 > [!IMPORTANT]
-> **Clinical & Research Disclaimer:** SmartPace is an academic research software prototype and is **NOT a certified medical device**. The decision-support simulator evaluates algorithmic policies on recorded retrospective ECG streams and does **NOT provide real-time clinical pacing or diagnosis**. Nothing contained in this repository is intended for patient treatment, clinical diagnosis, or controlling real implantable or external cardiac hardware.
+> **Clinical & Research Disclaimer:** SmartPace Live is an academic research software prototype and is **NOT a certified medical device**. The platform provides research-grade visualization of uncertainty estimation, selective abstention, and explainability on retrospective clinical recordings (MIT-BIH and NSTDB). It does **NOT provide real-time clinical diagnosis or pacemaker actuation**. Nothing contained in this repository is intended for patient treatment or controlling medical hardware.
 
 ---
 
@@ -385,10 +386,92 @@ Outputs on-device batch-1 latency (mean, median, 95th percentile), peak RSS memo
 
 ---
 
+## 🚀 SmartPace Live: Real-Time Web Platform
+
+SmartPace Live upgrades the static research pipeline into an interactive, research-grade web application built with **FastAPI** + **WebSockets** on the backend and **React** + **TypeScript** + **Vite** + **Tailwind CSS** on the frontend.
+
+### 5 Dedicated Research Views
+
+1. **Live ECG Monitor (`LiveMonitorPage`)**:
+   - **60fps HTML5 Canvas**: Real-time scrolling waveform with standard ECG paper grid (25 mm/s, 10 mm/mV), detected Pan-Tompkins R-peaks, and freeze/gain controls.
+   - **Live Vitals & Metrics**: Dynamic Heart Rate (BPM), RR Interval (ms), Composite Signal Quality Index (SQI), and <15ms inference latency.
+   - **Rhythm Classification**: Calibrated ResNet-1D AAMI 5-class distribution (N, S, V, F, Q), Temperature scaling ($T=1.42$), Shannon entropy, and MC uncertainty.
+   - **Adaptive Tri-Gate**: 3-stage validation gates (SQI $\ge 0.50$, Uncertainty $\tau \le 0.45$, Mahalanobis Latent Shift $\lambda \le 18.5$) producing verifiable decisions: `ACCEPT`, `REJECT_QUALITY`, `ABSTAIN_UNCERTAIN`, or `ABSTAIN_UNFAMILIAR`.
+   - **Event Timeline**: Real-time event log with filters and one-click inspection in the Explainability Lab.
+
+2. **Explainability Lab (`ExplainabilityLabPage`)**:
+   - **Axiomatic Integrated Gradients Overlay**: Path-integrated attribution over Gauss-Legendre quadrature ($m=20$ to $50$ steps).
+   - **Anatomical Region Localization**: Dynamic attribution breakdown over P-wave, PR segment, QRS complex, and ST/T segments with clinical significance notes.
+   - **Perturbation Stability Stress Test**: Computes Spearman rank correlation $\rho$ under non-semantic noise to verify attribution invariance and counterfactual robustness.
+   - **Case C Silent-Failure Inspection**: Deep-dive into high-confidence distribution shifts where conventional softmax fails, demonstrating how Mahalanobis shift intercepts silent errors.
+
+3. **Reliability & Stress Testing (`StressTestPage`)**:
+   - **Real NSTDB Noise Injection**: Baseline Wander (BW), Electrode Motion (EM), Muscle Artifact (MA), and composite noise at user-selectable SNRs (-6 dB to +24 dB).
+   - **Side-by-Side Waveforms**: Real-time comparison of clean vs corrupted ECG signals with live SQI degradation tracking.
+   - **Multi-Policy Comparative Decision Matrix**: Side-by-side evaluation across 5 architectures: (1) Standard Softmax, (2) SQI Only, (3) Uncertainty Only, (4) Dual-Gate, and (5) SmartPace Adaptive Tri-Gate.
+   - **Risk-Coverage Curves**: Area Under Risk-Coverage (AURC) trade-off curves for selective classification.
+
+4. **Research Evaluation (`ResearchEvaluationPage`)**:
+   - Direct interactive exploration of empirical validation results from experiments 1 through 6 loaded from `runs/first/results/`.
+
+5. **Model & System Information (`SystemInfoPage`)**:
+   - Complete architectural transparency: ResNet-1D parameter counts, input dimensions, calibrated threshold values, ONNX edge footprints, test suite status (35 passing), and academic research disclaimer.
+
+### 🏃 Quickstart & Running Locally
+
+```bash
+# 1. Install backend dependencies
+pip install -r requirements.txt
+
+# 2. Build frontend production assets
+cd frontend
+npm install
+npm run build
+cd ..
+
+# 3. Launch unified server (FastAPI serves API, WebSockets, and React frontend)
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
+Open **`http://localhost:8000`** in any modern web browser to access SmartPace Live.
+
+For frontend development with Hot Module Replacement (HMR):
+```bash
+# Terminal 1: Backend
+uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+
+# Terminal 2: Frontend dev server
+cd frontend && npm run dev
+```
+
+---
+
 ## 📂 Repository Layout
 
 ```
 smartpace/
+├── backend/                   # FastAPI backend & streaming services
+│   ├── main.py                # Application entry point & static SPA mount
+│   ├── routes/                # Stream, inference, XAI, stress, evaluation, system routes
+│   └── services/              # ECG source manager, event store, WebSocket stream manager
+│
+├── frontend/                  # React + TypeScript + Vite frontend
+│   ├── src/components/        # Canvas waveform, metrics, prediction, tri-gate, timeline
+│   ├── src/pages/             # 5 Dedicated research views
+│   └── src/services/api.ts    # Typed REST & WebSocket API client
+│
+├── smartpace/                 # Core research package & ML adapter
+│   ├── adapter.py             # SmartPaceEngine bridging trained PyTorch models & API
+│   ├── config.py              # Protocol constants & patient splits
+│   ├── preprocess.py          # Butterworth filter, Pan-Tompkins, SQI extraction
+│   ├── noise.py               # NSTDB noise bank & exact SNR corruptor
+│   ├── models.py              # ResNet1D, CNN1D, CNN-Transformer architectures
+│   └── explain.py             # Integrated Gradients & P-QRS-T anatomical masks
+│
+├── tests/                     # 35 Unit and integration tests (all passing)
+│   ├── test_smartpace.py      # Core ML pipeline unit tests
+│   └── test_api_and_streaming.py # FastAPI, WebSockets, and engine integration tests
+│
+
 ├── run_all.py                 # Primary entry point orchestrating experiments 1-6
 ├── requirements.txt           # Verified Python dependency specifications
 ├── pytest.ini                 # Pytest configuration
