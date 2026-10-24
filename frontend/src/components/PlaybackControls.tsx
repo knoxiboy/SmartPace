@@ -92,9 +92,9 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
               disabled={status.is_streaming}
               className="bg-slate-900 border border-slate-700 text-cyan-300 text-xs font-mono rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 disabled:opacity-50"
             >
-              {records.map((r) => (
+              {(Array.isArray(records) ? records : []).map((r) => (
                 <option key={r.name} value={r.name}>
-                  {r.name} ({r.source} • {r.leads.join('/')})
+                  {r.name} ({r.source || 'MIT-BIH'} • {Array.isArray(r.leads) ? r.leads.join('/') : 'MLII'})
                 </option>
               ))}
             </select>

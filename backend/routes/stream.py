@@ -137,27 +137,28 @@ async def websocket_ecg_endpoint(websocket: WebSocket):
             pass
 
     stream_mgr.subscribe(client_callback)
-
-    # Send initial connection greeting with current stream status
-    await websocket.send_json({
-        "type": "connection_established",
-        "message": "Connected to SmartPace Live ECG Engine",
-        "status": stream_mgr.get_status(),
-    })
-
-    # Task to pump queued messages to the WebSocket
-    async def sender_loop():
-        try:
-            while True:
-                msg = await client_queue.get()
-                await websocket.send_json(msg)
-                client_queue.task_done()
-        except Exception:
-            pass
-
-    sender_task = asyncio.create_task(sender_loop())
+    sender_task = None
 
     try:
+        # Send initial connection greeting with current stream status
+        await websocket.send_json({
+            "type": "connection_established",
+            "message": "Connected to SmartPace Live ECG Engine",
+            "status": stream_mgr.get_status(),
+        })
+
+        # Task to pump queued messages to the WebSocket
+        async def sender_loop():
+            try:
+                while True:
+                    msg = await client_queue.get()
+                    await websocket.send_json(msg)
+                    client_queue.task_done()
+            except Exception:
+                pass
+
+        sender_task = asyncio.create_task(sender_loop())
+
         # Listen for client control commands via WebSocket
         while True:
             text = await websocket.receive_text()
@@ -175,14 +176,18 @@ async def websocket_ecg_endpoint(websocket: WebSocket):
                 elif action == "seek":
                     await stream_mgr.seek(float(cmd.get("timestamp_s", 0.0)))
             except Exception as e:
-                await websocket.send_json({"type": "command_error", "detail": str(e)})
+                try:
+                    await websocket.send_json({"type": "command_error", "detail": str(e)})
+                except Exception:
+                    break
 
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, Exception):
         pass
     finally:
         stream_mgr.unsubscribe(client_callback)
-        sender_task.cancel()
-        try:
-            await sender_task
-        except asyncio.CancelledError:
-            pass
+        if sender_task is not None:
+            sender_task.cancel()
+            try:
+                await sender_task
+            except (asyncio.CancelledError, Exception):
+                pass

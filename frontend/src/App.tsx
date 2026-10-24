@@ -56,12 +56,16 @@ export const App: React.FC = () => {
   useEffect(() => {
     api.getRecords()
       .then((recs) => {
-        setRecords(recs);
-        if (recs.length > 0) {
-          setSelectedRecord(recs[0].name);
+        const arr = Array.isArray(recs) ? recs : [];
+        setRecords(arr);
+        if (arr.length > 0) {
+          setSelectedRecord(arr[0].name);
         }
       })
-      .catch(console.error);
+      .catch((err) => {
+        console.error('Failed to load records:', err);
+        setRecords([]);
+      });
 
     loadEvents();
   }, []);

@@ -152,6 +152,14 @@ async def compare_abstention_policies(req: ComparePoliciesRequest, request: Requ
         {"policy": "5. Adaptive Reliability (Tri-Gate)", "rejected": not bool(tri_decision.is_accepted[0]), "accepted": bool(tri_decision.is_accepted[0]), "decision": str(tri_decision.action[0]), "reason": tri_decision.rejection_reason[0]},
     ]
 
+    policies_dict = {
+        "standard": {"is_accepted": True, "decision": {"status": "ACCEPT", "reason": "Standard argmax"}},
+        "sqi_only": {"is_accepted": not rej_p1, "decision": {"status": "REJECT_QUALITY" if rej_p1 else "ACCEPT", "reason": "SQI threshold veto" if rej_p1 else "Pass"}},
+        "uncertainty_only": {"is_accepted": not rej_p2, "decision": {"status": "ABSTAIN_UNCERTAIN" if rej_p2 else "ACCEPT", "reason": "Entropy threshold veto" if rej_p2 else "Pass"}},
+        "dual_gate": {"is_accepted": not rej_p3, "decision": {"status": "REJECT" if rej_p3 else "ACCEPT", "reason": "Dual gate veto" if rej_p3 else "Pass"}},
+        "tri_gate_smartpace": {"is_accepted": bool(tri_decision.is_accepted[0]), "decision": {"status": str(tri_decision.action[0]), "reason": tri_decision.rejection_reason[0]}},
+    }
+
     return {
         "predicted_class": pred_class,
         "confidence": conf,
@@ -164,6 +172,7 @@ async def compare_abstention_policies(req: ComparePoliciesRequest, request: Requ
             "rr_valid": float(sqi_features[0, 3]),
         },
         "policies_comparison": policies_summary,
+        "policies": policies_dict,
     }
 
 

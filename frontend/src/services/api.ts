@@ -1,4 +1,4 @@
-import {
+import type {
   RecordItem,
   StreamStatus,
   EventItem,
@@ -17,7 +17,10 @@ export const api = {
   async getRecords(): Promise<RecordItem[]> {
     const res = await fetch(`${API_BASE}/records`);
     if (!res.ok) throw new Error('Failed to fetch records');
-    return res.json();
+    const data = await res.json();
+    if (Array.isArray(data)) return data;
+    if (data && Array.isArray(data.records)) return data.records;
+    return [];
   },
 
   async startStream(params: {
@@ -78,7 +81,11 @@ export const api = {
 
     const res = await fetch(`${API_BASE}/events?${query.toString()}`);
     if (!res.ok) throw new Error('Failed to fetch events');
-    return res.json();
+    const data = await res.json();
+    return {
+      total: data.total || (data.events ? data.events.length : 0),
+      events: Array.isArray(data.events) ? data.events : (Array.isArray(data) ? data : []),
+    };
   },
 
   async getEventById(id: string): Promise<any> {
@@ -127,7 +134,11 @@ export const api = {
   async getFailureCases(): Promise<{ count: number; cases: FailureCase[] }> {
     const res = await fetch(`${API_BASE}/explain/failure_cases`);
     if (!res.ok) throw new Error('Failed to fetch failure cases');
-    return res.json();
+    const data = await res.json();
+    return {
+      count: data.count || (data.cases ? data.cases.length : 0),
+      cases: Array.isArray(data.cases) ? data.cases : (Array.isArray(data) ? data : []),
+    };
   },
 
   // Stress & Reliability
@@ -185,14 +196,22 @@ export const api = {
   async getTradeoffCurves(): Promise<{ curves: TradeoffCurve[] }> {
     const res = await fetch(`${API_BASE}/stress/tradeoff_curves`);
     if (!res.ok) throw new Error('Failed to fetch risk-coverage curves');
-    return res.json();
+    const data = await res.json();
+    return {
+      curves: Array.isArray(data.curves)
+        ? data.curves
+        : Array.isArray(data.tradeoff_curves)
+        ? data.tradeoff_curves
+        : [],
+    };
   },
 
   // Research Evaluation
   async getExperiments(): Promise<any> {
     const res = await fetch(`${API_BASE}/evaluation/experiments`);
     if (!res.ok) throw new Error('Failed to fetch experiment list');
-    return res.json();
+    const data = await res.json();
+    return Array.isArray(data) ? data : (data.experiments || []);
   },
 
   async getExperimentResults(expName: string): Promise<any> {
