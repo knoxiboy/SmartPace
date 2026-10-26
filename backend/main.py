@@ -15,7 +15,7 @@ from .services.ecg_source import ECGSourceManager
 from .services.event_store import EventStore
 from .services.stream_manager import StreamManager
 
-from .routes import stream, inference, explainability, stress_test, evaluation, system_info
+from .routes import stream, inference, explainability, stress_test, evaluation, system_info, benchmark
 
 
 @asynccontextmanager
@@ -57,6 +57,7 @@ app.add_middleware(
 # Include API Routers
 app.include_router(stream.router)
 app.include_router(inference.router)
+app.include_router(benchmark.router)
 app.include_router(explainability.router)
 app.include_router(stress_test.router)
 app.include_router(evaluation.router)

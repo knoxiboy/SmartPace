@@ -1,9 +1,5 @@
-"""SmartPace Live Adapter — Clinical Research Inference & Reliability Engine.
-
-Wraps the existing SmartPace modules (preprocess, models, train, reliability, explain, edge)
-into a unified, thread-safe service for streaming replay and real-time analysis.
-"""
 import os
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -24,35 +20,127 @@ class SmartPaceEngine:
         edge_onnx_path: Optional[str] = None,
         data_cache_path: Optional[str] = None,
         device: Optional[str] = None,
+        mode: str = "single",
     ):
+        self._lock = threading.RLock()
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model_path = model_path or os.path.join("runs", "first", "models", "resnet1d_AB_s0.pt")
         self.edge_onnx_path = edge_onnx_path or os.path.join("runs", "first", "edge", "resnet1d_int8.onnx")
         self.data_cache_path = data_cache_path or os.path.join("data", "cache", "mitbih.npz")
 
+        self.mode: str = mode
         self.model: Optional[torch.nn.Module] = None
         self.meta: Dict[str, Any] = {}
         self.arch: str = "resnet1d"
+
+        # Deep Ensemble members (s0, s1, s2)
+        self.ensemble_models: List[torch.nn.Module] = []
+        self.ensemble_paths: List[str] = []
+        self.ensemble_available: bool = False
+        self.ensemble_unavailable_reason: Optional[str] = None
+
         self.abstention_module: Optional[reliability.AdaptiveAbstentionModule] = None
         self.sqi_gate: Optional[preprocess.SQIGate] = None
         self.shift_detector: Optional[reliability.MahalanobisShiftDetector] = None
 
         self._load_model_and_calibrate()
+        if self.mode == "ensemble" and not self.ensemble_available:
+            self.mode = "single"
+
+    def set_inference_mode(self, mode: str) -> Dict[str, Any]:
+        """Safely toggle between 'single' seed and 'ensemble' (3 seeds) inference."""
+        with self._lock:
+            if mode not in ("single", "ensemble"):
+                raise ValueError(f"Invalid mode '{mode}'. Expected 'single' or 'ensemble'.")
+            if mode == "ensemble" and not self.ensemble_available:
+                raise RuntimeError(
+                    f"Deep Ensemble mode is unavailable: {self.ensemble_unavailable_reason or 'Missing ensemble checkpoints'}"
+                )
+            self.mode = mode
+            return self.get_inference_mode()
+
+    def get_inference_mode(self) -> Dict[str, Any]:
+        """Returns the active inference mode and loaded member information."""
+        with self._lock:
+            return {
+                "mode": self.mode,
+                "active_models": len(self.ensemble_models) if self.mode == "ensemble" else 1,
+                "ensemble_available": self.ensemble_available,
+                "ensemble_unavailable_reason": self.ensemble_unavailable_reason,
+                "primary_model": os.path.basename(self.model_path),
+                "ensemble_members": [os.path.basename(p) for p in self.ensemble_paths],
+            }
 
     def _load_model_and_calibrate(self) -> None:
-        """Load PyTorch checkpoint and calibrate the tri-gate abstention module."""
-        # 1. Load PyTorch model if available
-        if os.path.exists(self.model_path):
-            self.model, self.meta = train.load_model(self.model_path)
-            self.model = self.model.to(self.device).eval()
-            self.arch = self.meta.get("arch", "resnet1d")
-        else:
-            # Fallback to creating a fresh architecture if checkpoint missing
-            self.model = train.M.build("resnet1d").to(self.device).eval()
-            self.arch = "resnet1d"
+        """Load PyTorch checkpoint, ensemble members, and calibrate the tri-gate module."""
+        with self._lock:
+            # 1. Load primary PyTorch model if available
+            if os.path.exists(self.model_path):
+                self.model, self.meta = train.load_model(self.model_path)
+                self.model = self.model.to(self.device).eval()
+                for p in self.model.parameters():
+                    p.requires_grad = False
+                self.arch = self.meta.get("arch", "resnet1d")
+            else:
+                self.model = train.M.build("resnet1d").to(self.device).eval()
+                for p in self.model.parameters():
+                    p.requires_grad = False
+                self.arch = "resnet1d"
 
-        # 2. Setup SQI Gate
-        self.sqi_gate = preprocess.SQIGate(q=1.0, use_bw=False)
+            # 2. Discover and load Deep Ensemble members (s0, s1, s2)
+            models_dir = os.path.dirname(self.model_path)
+            candidate_seeds = ["s0", "s1", "s2"]
+            loaded_members = []
+            loaded_paths = []
+            missing_members = []
+
+            for s in candidate_seeds:
+                # e.g., resnet1d_AB_s0.pt
+                expected_filename = f"{self.arch}_AB_{s}.pt"
+                candidate_path = os.path.join(models_dir, expected_filename)
+                if not os.path.exists(candidate_path):
+                    # Check runs/first/models/
+                    alt_path = os.path.join("runs", "first", "models", expected_filename)
+                    if os.path.exists(alt_path):
+                        candidate_path = alt_path
+
+                if os.path.exists(candidate_path):
+                    try:
+                        m, m_meta = train.load_model(candidate_path)
+                        m = m.to(self.device).eval()
+                        for param in m.parameters():
+                            param.requires_grad = False
+
+                        # Verify output dimensions
+                        dummy = torch.zeros(1, 1, C.WIN, device=self.device)
+                        with torch.no_grad():
+                            dummy_out = m(dummy)
+                            if dummy_out.shape != (1, C.N_CLASSES):
+                                missing_members.append(f"{candidate_path} (invalid shape {dummy_out.shape})")
+                                continue
+
+                        loaded_members.append(m)
+                        loaded_paths.append(candidate_path)
+                    except Exception as exc:
+                        missing_members.append(f"{candidate_path} (load error: {exc})")
+                else:
+                    missing_members.append(candidate_path)
+
+            if len(loaded_members) == 3 and not missing_members:
+                self.ensemble_models = loaded_members
+                self.ensemble_paths = loaded_paths
+                self.ensemble_available = True
+                self.ensemble_unavailable_reason = None
+            else:
+                self.ensemble_models = loaded_members
+                self.ensemble_paths = loaded_paths
+                self.ensemble_available = False
+                self.ensemble_unavailable_reason = (
+                    f"Ensemble requires 3 verified checkpoints; available: {len(loaded_members)}/3. Issues: {missing_members}"
+                )
+
+            # 3. Setup SQI Gate
+            self.sqi_gate = preprocess.SQIGate(q=1.0, use_bw=False)
 
         # 3. Setup Mahalanobis Shift Detector
         self.shift_detector = reliability.MahalanobisShiftDetector(alpha=0.05, eps=1e-4)
@@ -166,13 +254,62 @@ class SmartPaceEngine:
 
         # 2. Model Inference
         t0_infer = time.perf_counter()
+        with self._lock:
+            current_mode = self.mode if (self.mode == "single" or self.ensemble_available) else "single"
+
         with torch.no_grad():
             xt = torch.from_numpy(x_in).to(self.device)
-            features = self.model.extract_features(xt).cpu().numpy()  # (1, D)
-            logits = self.model(xt).cpu().numpy()                     # (1, 5)
+
+            if current_mode == "single":
+                features = self.model.extract_features(xt).cpu().numpy()  # (1, D)
+                logits = self.model(xt).cpu().numpy()                     # (1, 5)
+                probs = softmax(logits, axis=1)[0]
+                ensemble_info = {
+                    "mode": "single",
+                    "active_models": 1,
+                    "disagreement": 0.0,
+                    "probability_variance": 0.0,
+                    "agreement_ratio": 1.0,
+                    "mean_abs_deviation": 0.0,
+                }
+            else:
+                # Deep Ensemble: evaluate all verified members
+                member_probs_list = []
+                member_preds = []
+                member_feats = []
+                for m in self.ensemble_models:
+                    m_logits = m(xt).cpu().numpy()
+                    m_probs = softmax(m_logits, axis=1)[0]
+                    if not np.all(np.isfinite(m_probs)):
+                        raise ValueError("Non-finite probability output encountered from ensemble member")
+                    member_probs_list.append(m_probs)
+                    member_preds.append(int(np.argmax(m_probs)))
+                    member_feats.append(m.extract_features(xt).cpu().numpy())
+
+                # Aggregate probabilities: P_bar = (1/M) * sum(P_m)
+                probs = np.mean(member_probs_list, axis=0)
+                pred_idx_mean = int(np.argmax(probs))
+
+                # Disagreement and dispersion metrics
+                agree_count = sum(1 for p in member_preds if p == pred_idx_mean)
+                agreement_ratio = float(agree_count / len(member_preds))
+                disagreement = float(1.0 - agreement_ratio)
+                prob_variance = float(np.mean(np.var(member_probs_list, axis=0)))
+                mean_abs_dev = float(np.mean([np.sum(np.abs(mp - probs)) for mp in member_probs_list]))
+
+                features = member_feats[0]  # Calibrated shift detector expects D-dimensional primary feature space
+                ensemble_info = {
+                    "mode": "ensemble",
+                    "active_models": len(self.ensemble_models),
+                    "member_predictions": [C.CLASSES[p] for p in member_preds],
+                    "disagreement": disagreement,
+                    "probability_variance": prob_variance,
+                    "agreement_ratio": agreement_ratio,
+                    "mean_abs_deviation": mean_abs_dev,
+                }
+
         inference_time_ms = (time.perf_counter() - t0_infer) * 1000.0
 
-        probs = softmax(logits, axis=1)[0]
         pred_idx = int(np.argmax(probs))
         predicted_class = C.CLASSES[pred_idx]
         confidence = float(probs[pred_idx])
@@ -250,6 +387,9 @@ class SmartPaceEngine:
             "confidence": confidence,
             "predictive_entropy": predictive_entropy,
             "class_probabilities": {c: float(probs[i]) for i, c in enumerate(C.CLASSES)},
+            "inference_mode": current_mode,
+            "active_models": ensemble_info["active_models"],
+            "ensemble_info": ensemble_info,
             "reliability": {
                 "action": action,
                 "is_accepted": is_accepted,

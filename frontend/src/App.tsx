@@ -15,6 +15,7 @@ import {
   VitalsData,
   ArrhythmiaClass,
   DecisionStatus,
+  InferenceModeInfo,
 } from './types';
 
 export const App: React.FC = () => {
@@ -37,6 +38,13 @@ export const App: React.FC = () => {
     window_count: 0,
     active_clients: 0,
   });
+
+  // Inference Mode State (Single Seed vs Deep Ensemble)
+  const [inferenceMode, setInferenceModeState] = useState<'single' | 'ensemble'>('single');
+  const [inferenceModeInfo, setInferenceModeInfo] = useState<InferenceModeInfo | null>(null);
+  const [isSwitchingMode, setIsSwitchingMode] = useState<boolean>(false);
+  const [modeSwitchError, setModeSwitchError] = useState<string | null>(null);
+  const [latestEnsembleInfo, setLatestEnsembleInfo] = useState<any>(null);
 
   // Real-time rolling sample buffer for canvas (kept up to 3000 samples)
   const [samples, setSamples] = useState<{ value: number; is_rpeak: boolean; timestamp: number }[]>([]);
@@ -69,6 +77,14 @@ export const App: React.FC = () => {
         setRecords([]);
       });
 
+    // Load initial inference mode
+    api.getInferenceMode()
+      .then((info) => {
+        setInferenceModeInfo(info);
+        setInferenceModeState(info.mode);
+      })
+      .catch(() => {});
+
     loadEvents();
   }, []);
 
@@ -79,6 +95,20 @@ export const App: React.FC = () => {
       })
       .catch(console.error);
   }, []);
+
+  const handleInferenceModeToggle = async (targetMode: 'single' | 'ensemble') => {
+    setIsSwitchingMode(true);
+    setModeSwitchError(null);
+    try {
+      const res = await api.setInferenceMode(targetMode);
+      setInferenceModeInfo(res);
+      setInferenceModeState(res.mode);
+    } catch (err: any) {
+      setModeSwitchError(err?.message || 'Failed to switch inference mode');
+    } finally {
+      setIsSwitchingMode(false);
+    }
+  };
 
   // WebSocket Telemetry Connection
   useEffect(() => {
@@ -101,7 +131,7 @@ export const App: React.FC = () => {
         try {
           const msg = JSON.parse(event.data);
 
-          // 1. Continuous ECG waveform telemetry chunk
+          // 1. Continuous ECG waveform telemetry chunk with incremental R-peaks
           if (msg.type === 'ecg_chunk' || msg.type === 'sample') {
             const rawSamples: number[] = Array.isArray(msg.samples)
               ? msg.samples
@@ -119,9 +149,39 @@ export const App: React.FC = () => {
 
               setSamples((prev) => {
                 const merged = [...prev, ...newPoints];
-                return merged.length > 3000 ? merged.slice(merged.length - 3000) : merged;
+                const nextSamples = merged.length > 3000 ? merged.slice(merged.length - 3000) : merged;
+
+                // Mark incremental R-peaks detected in this incoming chunk
+                if (Array.isArray(msg.r_peaks) && msg.r_peaks.length > 0) {
+                  const len = nextSamples.length;
+                  for (const pk of msg.r_peaks) {
+                    const delay = Number(pk.delay_samples) || 22;
+                    const targetIdx = len - 1 - delay;
+                    if (targetIdx >= 0 && targetIdx < len) {
+                      nextSamples[targetIdx] = { ...nextSamples[targetIdx], is_rpeak: true };
+                    }
+                  }
+                }
+                return nextSamples;
               });
             }
+          }
+
+          // 1b. Real-time discrete R-peak event
+          else if (msg.type === 'r_peak_event') {
+            const delay = Number(msg.delay_samples) || 22;
+            setSamples((prev) => {
+              const len = prev.length;
+              if (len === 0) return prev;
+              const targetIdx = Math.max(0, len - 1 - delay);
+              return prev.map((s, idx) => (idx === targetIdx ? { ...s, is_rpeak: true } : s));
+            });
+          }
+
+          // 1c. Live inference mode changed event
+          else if (msg.type === 'inference_mode_changed') {
+            setInferenceModeState(msg.mode);
+            setInferenceModeInfo((prev) => ({ ...prev, ...msg }));
           }
 
           // 2. Window ML inference decision & Tri-Gate reliability result
@@ -180,6 +240,9 @@ export const App: React.FC = () => {
             setLatestVitals(vitalsData);
             setLatestShiftScore(shift);
             setLatencyMs(lat);
+            if (data.ensemble_info) {
+              setLatestEnsembleInfo(data.ensemble_info);
+            }
 
             // Mark detected R-peaks in recent rolling canvas buffer
             if (Array.isArray(vit.r_peak_indices) && vit.r_peak_indices.length > 0) {
@@ -391,6 +454,12 @@ export const App: React.FC = () => {
             events={events}
             onSelectEventForExplanation={handleSelectEventForExplanation}
             onRefreshEvents={loadEvents}
+            inferenceMode={inferenceMode}
+            inferenceModeInfo={inferenceModeInfo}
+            onInferenceModeToggle={handleInferenceModeToggle}
+            isSwitchingMode={isSwitchingMode}
+            modeSwitchError={modeSwitchError}
+            latestEnsembleInfo={latestEnsembleInfo}
           />
         )}
 

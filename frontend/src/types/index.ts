@@ -206,3 +206,68 @@ export interface SystemInfo {
   noise_nstdb_available: boolean;
   disclaimer: string;
 }
+
+export interface InferenceModeInfo {
+  mode: 'single' | 'ensemble';
+  active_models: number;
+  ensemble_available: boolean;
+  ensemble_unavailable_reason?: string | null;
+  primary_model?: string;
+  ensemble_members?: string[];
+}
+
+export interface BenchmarkResult {
+  status: string;
+  benchmark_type: string;
+  test_windows_evaluated: number;
+  repetitions_per_window: number;
+  total_timed_inferences: number;
+  warmup_runs: number;
+  timing_unit: string;
+  pytorch_fp32: {
+    model_file: string;
+    size_kb: number;
+    device: string;
+    mean_latency_ms: number;
+    median_latency_ms: number;
+    p95_latency_ms: number;
+    p99_latency_ms: number;
+    min_latency_ms: number;
+    max_latency_ms: number;
+  };
+  onnx_int8: {
+    model_file: string;
+    size_kb: number;
+    execution_provider: string;
+    all_providers: string[];
+    mean_latency_ms: number;
+    median_latency_ms: number;
+    p95_latency_ms: number;
+    p99_latency_ms: number;
+    min_latency_ms: number;
+    max_latency_ms: number;
+  };
+  comparison: {
+    speedup_ratio_median: number;
+    speedup_ratio_mean: number;
+    compression_ratio: number;
+    prediction_agreement_rate: number;
+    prediction_agreement_pct: number;
+    matching_windows: number;
+    mean_probability_drift: number;
+    max_probability_drift: number;
+  };
+  scientific_disclaimer: string;
+}
+
+export interface PeakEvent {
+  sample_index: number;
+  timestamp: number;
+  detection_sample_idx: number;
+  detection_time_s: number;
+  amplitude: number;
+  delay_samples: number;
+  delay_ms: number;
+  confidence: number;
+}
+

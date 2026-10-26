@@ -3,7 +3,7 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch 2.1+](https://img.shields.io/badge/PyTorch-2.1+-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![ONNX Runtime](https://img.shields.io/badge/ONNX_Runtime-1.17+-005CED?logo=onnx&logoColor=white)](https://onnxruntime.ai/)
-[![Tests Passing](https://img.shields.io/badge/Tests-35%20Passed-brightgreen)](tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-50%20Passed-brightgreen)](tests/)
 [![Web Platform](https://img.shields.io/badge/SmartPace_Live-FastAPI%20%2B%20React-10b981?logo=react&logoColor=white)](backend/)
 [![PhysioNet Compatible](https://img.shields.io/badge/PhysioNet-MIT--BIH%20%7C%20PTB--XL%20%7C%20NSTDB-008080)](https://physionet.org/)
 [![Edge Latency](https://img.shields.io/badge/Edge_Inference-0.55ms_%2F_INT8-success)](smartpace/edge.py)
@@ -506,6 +506,41 @@ smartpace/
     ├── results/               # Raw experiment output CSVs and JSON summaries
     ├── models/                # Trained PyTorch model checkpoints (.pt)
     └── edge/                  # Exported FP32, INT8, and pruned ONNX artifacts
+```
+
+---
+
+## ⚡ Week 1 Engineering Features & Operating Guide
+
+### 1. Single Seed vs. Deep Ensemble Inference
+SmartPace supports real-time mode switching between **Single Seed (Low Latency)** and **Deep Ensemble (3 Models)**:
+- **Single Seed:** Executes the primary verified checkpoint `runs/first/models/resnet1d_AB_s0.pt` (~15ms latency).
+- **Deep Ensemble:** Concurrently runs all three independently trained checkpoints (`resnet1d_AB_s0.pt`, `resnet1d_AB_s1.pt`, `resnet1d_AB_s2.pt`). Member logits are independently converted to probabilities via softmax, then averaged ($\bar{P} = \frac{1}{M}\sum_{m=1}^M P_m$). Disagreement rate ($1.0 - \text{agreement}$) and probability variance are reported.
+- **Tri-Gate Integrity:** SQI gating, predictive entropy, and Mahalanobis feature-distance distribution shift detection remain active in both modes.
+- **API Endpoints:**
+  - `GET /api/inference/mode` -> returns active mode, loaded models, ensemble availability.
+  - `POST /api/inference/mode` with body `{"mode": "single" | "ensemble"}` -> switches mode thread-safely on the live stream and broadcasts `inference_mode_changed` over WebSocket.
+
+### 2. Live Measured PyTorch FP32 vs. ONNX INT8 Benchmark
+- **Service:** Evaluates equivalent 10s preprocessed ECG windows ($1 \times 2500$ float32) across PyTorch FP32 and quantized ONNX INT8 (`runs/first/edge/resnet1d_int8.onnx`).
+- **Timing Rigor:** Excludes model session initialization and incorporates 10 warm-up runs outside the timed loop. Measures latency using monotonic `time.perf_counter_ns()`.
+- **Metrics Reported:** Median, mean, p95, and p99 latency; speedup ratio ($\text{FP32}_{\text{median}} / \text{INT8}_{\text{median}}$); classification agreement rate (%); mean absolute probability drift (MAE).
+- **Observed Benchmarks:** ~15.8ms FP32 vs ~1.15ms INT8 on CPU (~13.7x acceleration, 100% classification agreement, 0.0003 probability drift).
+- **API Endpoints:**
+  - `POST /api/benchmark/run?num_windows=50` (offloaded to thread, does not block WebSocket stream).
+  - `GET /api/benchmark/latest`.
+
+### 3. Incremental Causal Pan-Tompkins R-Peak Detection
+- **Architecture:** `CausalPanTompkins` processes successive 25-sample chunks ($100\text{ms}$) as they arrive, without waiting for the full 10-second classification window.
+- **Causal Signal Processing:** 2nd-order Butterworth causal bandpass filter (5–15 Hz) implemented with Second-Order Sections (`sosfilt`) carrying filter state `zi` across chunks; 5-point causal derivative; squaring; 37-sample ($150\text{ms}$) moving window integrator.
+- **Adaptive Thresholds & Refractory Period:** Dual adaptive thresholds ($SPKI, NPKI, THRI$) adjust dynamically. A 50-sample ($200\text{ms}$) physiological refractory period prevents duplicate peak emission.
+- **Timestamping:** Peaks report absolute record sample index and physiological timestamp ($t = \text{index} / f_s$).
+- **Streaming Lifecycle:** Stream seeking, restarting, or record switching invokes `causal_detector.reset(sample_idx)` to maintain sample alignment. Peak events are multiplexed into `ecg_chunk` packets and broadcast as discrete `r_peak_event` events.
+
+### 4. Running the Complete Test Suite
+```bash
+# Run all 50 unit and integration tests (35 core + 15 Week 1 roadmap tests)
+pytest tests/ -v
 ```
 
 ---

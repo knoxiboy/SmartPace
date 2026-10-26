@@ -7,7 +7,9 @@ import type {
   FailureCase,
   PolicyResult,
   TradeoffCurve,
-  SystemInfo
+  SystemInfo,
+  InferenceModeInfo,
+  BenchmarkResult,
 } from '../types';
 
 const API_BASE = '/api';
@@ -230,6 +232,54 @@ export const api = {
   async getExperimentResults(expName: string): Promise<any> {
     const res = await fetch(`${API_BASE}/evaluation/results/${expName}`);
     if (!res.ok) throw new Error(`Failed to fetch results for ${expName}`);
+    return res.json();
+  },
+
+  // Inference Mode (Single Seed vs Deep Ensemble)
+  async getInferenceMode(): Promise<InferenceModeInfo> {
+    const res = await fetch(`${API_BASE}/inference/mode`);
+    if (!res.ok) throw new Error('Failed to fetch inference mode');
+    return res.json();
+  },
+
+  async setInferenceMode(mode: 'single' | 'ensemble'): Promise<InferenceModeInfo> {
+    const res = await fetch(`${API_BASE}/inference/mode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to set inference mode');
+    }
+    return res.json();
+  },
+
+  // Live PyTorch FP32 vs ONNX INT8 Benchmark
+  async runBenchmark(params?: {
+    n_windows?: number;
+    repetitions?: number;
+    warmup_runs?: number;
+  }): Promise<BenchmarkResult> {
+    const res = await fetch(`${API_BASE}/benchmark/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        n_windows: params?.n_windows ?? 50,
+        repetitions: params?.repetitions ?? 3,
+        warmup_runs: params?.warmup_runs ?? 10,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Benchmark execution failed');
+    }
+    return res.json();
+  },
+
+  async getLatestBenchmark(): Promise<BenchmarkResult> {
+    const res = await fetch(`${API_BASE}/benchmark/latest`);
+    if (!res.ok) throw new Error('Failed to fetch latest benchmark');
     return res.json();
   },
 

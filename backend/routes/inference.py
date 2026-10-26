@@ -22,6 +22,10 @@ class ModelSelectRequest(BaseModel):
     model_name: str = Field(..., description="Checkpoint filename, e.g. 'resnet1d_AB_s0.pt' or 'cnn1d_AB_s0.pt'")
 
 
+class InferenceModeRequest(BaseModel):
+    mode: str = Field(..., description="'single' for single seed or 'ensemble' for 3-seed Deep Ensemble")
+
+
 @router.get("/api/events")
 async def get_recent_events(request: Request, limit: int = 50):
     """Returns recent streaming inference decisions."""
@@ -119,3 +123,32 @@ async def select_model(req: ModelSelectRequest, request: Request):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load model: {e}")
+
+
+@router.get("/api/inference/mode")
+async def get_inference_mode(request: Request):
+    """Returns the current inference mode (single seed vs deep ensemble)."""
+    engine = request.app.state.engine
+    return engine.get_inference_mode()
+
+
+@router.post("/api/inference/mode")
+async def set_inference_mode(req: InferenceModeRequest, request: Request):
+    """Switches the live inference mode between 'single' and 'ensemble'."""
+    engine = request.app.state.engine
+    try:
+        res = engine.set_inference_mode(req.mode)
+        # Notify stream manager if active
+        stream_mgr = getattr(request.app.state, "stream_manager", None)
+        if stream_mgr:
+            await stream_mgr.broadcast({
+                "type": "inference_mode_changed",
+                **res,
+            })
+        return {"status": "ok", **res}
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except RuntimeError as re:
+        raise HTTPException(status_code=409, detail=str(re))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to switch mode: {e}")

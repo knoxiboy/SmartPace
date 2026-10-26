@@ -11,6 +11,7 @@ from typing import Any, Callable, Coroutine, Dict, List, Optional
 import numpy as np
 
 from smartpace import config as C
+from smartpace.causal_detector import CausalPanTompkins, PeakEvent
 from .ecg_source import ECGSourceManager
 from .event_store import EventStore
 from smartpace.adapter import SmartPaceEngine
@@ -28,6 +29,7 @@ class StreamManager:
         self.source = ecg_source
         self.engine = engine
         self.event_store = event_store
+        self.causal_detector = CausalPanTompkins(fs=C.FS)
 
         # Playback state
         self.current_record: Optional[Dict[str, Any]] = None
@@ -80,6 +82,7 @@ class StreamManager:
             self.stride_sec = max(0.5, min(5.0, float(stride_sec)))
             self.current_sample_idx = max(0, min(int(start_time_s * C.FS), self.current_record["total_samples"] - 1))
             self.window_buffer = []
+            self.causal_detector.reset(initial_sample_idx=self.current_sample_idx)
             self.is_playing = True
             self.is_paused = False
 
@@ -122,6 +125,7 @@ class StreamManager:
     async def _stop_internal(self) -> None:
         self.is_playing = False
         self.is_paused = False
+        self.causal_detector.reset()
         if self._stream_task and not self._stream_task.done():
             self._stream_task.cancel()
             try:
@@ -136,6 +140,7 @@ class StreamManager:
                 total_samples = self.current_record["total_samples"]
                 self.current_sample_idx = max(0, min(int(timestamp_s * C.FS), total_samples - 1))
                 self.window_buffer = []
+                self.causal_detector.reset(initial_sample_idx=self.current_sample_idx)
         await self.broadcast({"type": "stream_seeked", "current_time_s": float(self.current_sample_idx / C.FS)})
         return self.get_status()
 
@@ -145,10 +150,17 @@ class StreamManager:
         await self.broadcast({"type": "stream_speed_changed", "speed": self.speed})
         return self.get_status()
 
+    async def set_inference_mode(self, mode: str) -> Dict[str, Any]:
+        async with self._lock:
+            res = self.engine.set_inference_mode(mode)
+        await self.broadcast({"type": "inference_mode_changed", **res})
+        return res
+
     def get_status(self) -> Dict[str, Any]:
         """Returns the current streaming and buffer status."""
         current_time = float(self.current_sample_idx / C.FS) if self.current_record else 0.0
         duration = float(self.current_record["duration_seconds"]) if self.current_record else 1800.0
+        inf_mode = self.engine.get_inference_mode() if hasattr(self, "engine") and hasattr(self.engine, "get_inference_mode") else {"mode": "single", "active_models": 1, "ensemble_available": False}
         return {
             "is_playing": self.is_playing,
             "is_streaming": self.is_playing,
@@ -168,6 +180,9 @@ class StreamManager:
             "active_subscribers": len(self._subscribers),
             "active_clients": len(self._subscribers),
             "mode": "replay",
+            "inference_mode": inf_mode["mode"],
+            "active_models": inf_mode["active_models"],
+            "ensemble_available": inf_mode.get("ensemble_available", False),
             "window_count": int(current_time / self.stride_sec) if self.stride_sec > 0 else 0,
             "buffer_samples": len(self.window_buffer),
             "target_window_samples": C.WIN,
@@ -195,8 +210,10 @@ class StreamManager:
                     # Loop back or finish
                     self.current_sample_idx = 0
                     self.window_buffer = []
+                    self.causal_detector.reset(initial_sample_idx=0)
                     await self.broadcast({"type": "stream_restarted"})
 
+                chunk_start_idx = self.current_sample_idx
                 end_idx = min(self.current_sample_idx + chunk_size, total)
                 chunk = all_samples[self.current_sample_idx:end_idx]
                 chunk_start_s = float(self.current_sample_idx / C.FS)
@@ -207,14 +224,26 @@ class StreamManager:
                 if len(self.window_buffer) > C.WIN * 2:
                     self.window_buffer = self.window_buffer[-C.WIN:]
 
-                # 1. Send ECG Chunk for live waveform rendering
+                # 1. Incremental causal R-peak detection on current incoming chunk
+                peak_events = self.causal_detector.process_chunk(chunk, start_sample_idx=chunk_start_idx)
+                peak_dicts = [p.to_dict() for p in peak_events]
+
+                # 2. Send ECG Chunk for live waveform rendering with embedded detected peaks
                 await self.broadcast({
                     "type": "ecg_chunk",
                     "timestamp": time.time(),
                     "record_time_s": chunk_start_s,
                     "samples": chunk.tolist(),
                     "fs": C.FS,
+                    "r_peaks": peak_dicts,
                 })
+
+                # 3. Broadcast individual discrete peak events for telemetry subscribers
+                for p in peak_events:
+                    await self.broadcast({
+                        "type": "r_peak_event",
+                        **p.to_dict(),
+                    })
 
                 # 2. Check if we have accumulated at least a full 10-second window (2500 samples)
                 # and stepped past the configured stride
