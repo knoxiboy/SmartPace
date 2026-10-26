@@ -40,16 +40,16 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
 }) => {
   const speeds = [0.25, 0.5, 1.0, 2.0, 5.0];
 
-  const formatTime = (sec: number) => {
+  const formatTime = (sec?: number) => {
+    if (typeof sec !== 'number' || isNaN(sec)) return '0:00';
     const mins = Math.floor(sec / 60);
     const s = Math.floor(sec % 60);
     return `${mins}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  const progressPct =
-    status.total_duration_sec > 0
-      ? (status.elapsed_sec / status.total_duration_sec) * 100
-      : 0;
+  const elapsed = status?.elapsed_sec ?? (status as any)?.current_time_s ?? 0;
+  const duration = status?.total_duration_sec ?? (status as any)?.duration_s ?? 1800;
+  const progressPct = duration > 0 ? (elapsed / duration) * 100 : 0;
 
   return (
     <div className="rounded-xl border border-slate-800 bg-[#0f1422] p-4 shadow-md">
@@ -166,12 +166,12 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
       {/* Timeline Scrub Progress Bar */}
       <div className="mt-3 pt-3 border-t border-slate-800/80">
         <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 mb-1">
-          <span>{formatTime(status.elapsed_sec)}</span>
+          <span>{formatTime(elapsed)}</span>
           <span className="text-slate-500">
-            Window Count: <strong className="text-slate-300">{status.window_count}</strong> (10s
+            Window Count: <strong className="text-slate-300">{status.window_count || 0}</strong> (10s
             sliding inference)
           </span>
-          <span>{formatTime(status.total_duration_sec)}</span>
+          <span>{formatTime(duration)}</span>
         </div>
         <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
           <div

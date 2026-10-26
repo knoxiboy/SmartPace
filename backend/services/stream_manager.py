@@ -148,16 +148,27 @@ class StreamManager:
     def get_status(self) -> Dict[str, Any]:
         """Returns the current streaming and buffer status."""
         current_time = float(self.current_sample_idx / C.FS) if self.current_record else 0.0
-        duration = float(self.current_record["duration_seconds"]) if self.current_record else 0.0
+        duration = float(self.current_record["duration_seconds"]) if self.current_record else 1800.0
         return {
             "is_playing": self.is_playing,
+            "is_streaming": self.is_playing,
             "is_paused": self.is_paused,
-            "record_id": self.record_id,
-            "record_name": self.current_record["name"] if self.current_record else None,
+            "record_id": self.record_id or "mitdb_100",
+            "record_name": self.current_record["name"] if self.current_record else "MIT-BIH 100",
             "speed": self.speed,
+            "playback_speed": self.speed,
             "current_time_s": current_time,
+            "elapsed_sec": current_time,
             "duration_s": duration,
+            "total_duration_sec": duration,
             "progress_pct": float(current_time / duration * 100.0) if duration > 0 else 0.0,
+            "current_sample_idx": self.current_sample_idx,
+            "current_sample": self.current_sample_idx,
+            "total_samples": self.current_record["total_samples"] if self.current_record else 450000,
+            "active_subscribers": len(self._subscribers),
+            "active_clients": len(self._subscribers),
+            "mode": "replay",
+            "window_count": int(current_time / self.stride_sec) if self.stride_sec > 0 else 0,
             "buffer_samples": len(self.window_buffer),
             "target_window_samples": C.WIN,
         }

@@ -66,11 +66,18 @@ class ECGSourceManager:
 
     def load_record(self, record_id: str) -> Dict[str, Any]:
         """Loads a real recording, resamples to 250 Hz, and returns physical signal samples."""
-        if record_id in self._record_cache:
-            return self._record_cache[record_id]
+        clean_id = record_id.strip()
+        if clean_id.startswith("MIT-BIH "):
+            clean_id = f"mitdb_{clean_id.replace('MIT-BIH ', '').strip()}"
+        elif not clean_id.startswith("mitdb_") and not clean_id.startswith("upload_"):
+            if os.path.exists(os.path.join(self.mitdb_dir, f"{clean_id}.hea")):
+                clean_id = f"mitdb_{clean_id}"
 
-        if record_id.startswith("mitdb_"):
-            raw_id = record_id.replace("mitdb_", "")
+        if clean_id in self._record_cache:
+            return self._record_cache[clean_id]
+
+        if clean_id.startswith("mitdb_"):
+            raw_id = clean_id.replace("mitdb_", "")
             path = os.path.join(self.mitdb_dir, raw_id)
             if not (os.path.exists(path + ".hea") and os.path.exists(path + ".dat")):
                 raise FileNotFoundError(f"MIT-BIH record files not found for '{raw_id}' at {path}")

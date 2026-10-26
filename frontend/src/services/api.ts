@@ -28,13 +28,24 @@ export const api = {
     playback_speed?: number;
     start_sample?: number;
     lead_idx?: number;
-  }): Promise<{ status: string; detail: string }> {
+  }): Promise<{ status: string; detail?: string }> {
+    const payload = {
+      record_id: params.record_name || 'mitdb_100',
+      record_name: params.record_name || 'mitdb_100',
+      speed: params.playback_speed || 1.0,
+      playback_speed: params.playback_speed || 1.0,
+      stride_sec: 1.0,
+      start_time_s: 0.0,
+    };
     const res = await fetch(`${API_BASE}/stream/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error('Failed to start stream');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to start stream');
+    }
     return res.json();
   },
 

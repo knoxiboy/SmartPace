@@ -16,8 +16,10 @@ router = APIRouter(tags=["Streaming"])
 
 
 class StreamStartRequest(BaseModel):
-    record_id: str = Field(..., description="ID of the record to stream, e.g. 'mitdb_100'")
-    speed: float = Field(1.0, ge=0.25, le=10.0, description="Playback speed multiplier")
+    record_id: Optional[str] = Field(None, description="ID of the record to stream, e.g. 'mitdb_100'")
+    record_name: Optional[str] = Field(None, description="Alternative record name, e.g. '100'")
+    speed: Optional[float] = Field(None, ge=0.25, le=10.0, description="Playback speed multiplier")
+    playback_speed: Optional[float] = Field(None, ge=0.25, le=10.0, description="Alternative speed parameter")
     stride_sec: float = Field(1.0, ge=0.5, le=5.0, description="Sliding window inference stride in seconds")
     start_time_s: float = Field(0.0, ge=0.0, description="Start time position in seconds")
 
@@ -48,10 +50,12 @@ async def stream_status(request: Request):
 async def start_stream(req: StreamStartRequest, request: Request):
     """Starts live replay of a real ECG recording."""
     stream_mgr = request.app.state.stream_manager
+    rec_target = req.record_id or req.record_name or "mitdb_100"
+    spd_target = req.speed if req.speed is not None else (req.playback_speed if req.playback_speed is not None else 1.0)
     try:
         status = await stream_mgr.start(
-            record_id=req.record_id,
-            speed=req.speed,
+            record_id=rec_target,
+            speed=spd_target,
             stride_sec=req.stride_sec,
             start_time_s=req.start_time_s,
         )
