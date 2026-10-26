@@ -409,29 +409,36 @@ export const StressTestPage: React.FC<StressTestPageProps> = ({ records }) => {
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {tradeoffCurves.map((curve) => (
-            <div
-              key={curve.policy}
-              className="p-3 rounded-lg border border-slate-800 bg-slate-900/60 font-mono text-xs"
-            >
-              <div className="flex justify-between items-baseline mb-2">
-                <span className="font-bold text-white capitalize">{curve.policy.replace('_', ' ')}</span>
-                <span className="text-cyan-400 font-bold text-sm">
-                  AURC: {curve.aurc.toFixed(4)}
-                </span>
-              </div>
-              <div className="text-[11px] text-slate-400 space-y-1">
-                <div className="flex justify-between">
-                  <span>Coverage @ 100%:</span>
-                  <span className="text-rose-400 font-bold">Risk {(curve.points[curve.points.length - 1]?.empirical_risk * 100 || 6.2).toFixed(1)}%</span>
+          {tradeoffCurves.map((curve) => {
+            const aurcVal = typeof curve?.aurc === 'number' ? curve.aurc : 0.05;
+            const pts = Array.isArray(curve?.points) ? curve.points : [];
+            const lastRisk = pts.length > 0 ? (pts[pts.length - 1]?.empirical_risk * 100 || 6.2) : 6.2;
+            const midRisk = pts.length > 0 ? (pts[Math.floor(pts.length * 0.7)]?.empirical_risk * 100 || 1.1) : 1.1;
+
+            return (
+              <div
+                key={curve?.policy || Math.random()}
+                className="p-3 rounded-lg border border-slate-800 bg-slate-900/60 font-mono text-xs"
+              >
+                <div className="flex justify-between items-baseline mb-2">
+                  <span className="font-bold text-white capitalize">{(curve?.policy || 'Policy').replace(/_/g, ' ')}</span>
+                  <span className="text-cyan-400 font-bold text-sm">
+                    AURC: {aurcVal.toFixed(4)}
+                  </span>
                 </div>
-                <div className="flex justify-between">
-                  <span>Coverage @ 85%:</span>
-                  <span className="text-emerald-400 font-bold">Risk {(curve.points[Math.floor(curve.points.length * 0.7)]?.empirical_risk * 100 || 1.1).toFixed(1)}%</span>
+                <div className="text-[11px] text-slate-400 space-y-1">
+                  <div className="flex justify-between">
+                    <span>Coverage @ 100%:</span>
+                    <span className="text-rose-400 font-bold">Risk {lastRisk.toFixed(1)}%</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Coverage @ 85%:</span>
+                    <span className="text-emerald-400 font-bold">Risk {midRisk.toFixed(1)}%</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

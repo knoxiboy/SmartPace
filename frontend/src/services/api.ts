@@ -222,7 +222,9 @@ export const api = {
     const res = await fetch(`${API_BASE}/evaluation/experiments`);
     if (!res.ok) throw new Error('Failed to fetch experiment list');
     const data = await res.json();
-    return Array.isArray(data) ? data : (data.experiments || []);
+    return {
+      experiments: Array.isArray(data) ? data : (data.experiments || []),
+    };
   },
 
   async getExperimentResults(expName: string): Promise<any> {
