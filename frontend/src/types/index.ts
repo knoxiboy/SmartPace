@@ -1,19 +1,39 @@
-export type ArrhythmiaClass = 'N' | 'S' | 'V' | 'F' | 'Q';
+export type ArrhythmiaClass =
+  | 'N'
+  | 'S'
+  | 'V'
+  | 'F'
+  | 'Q'
+  | 'NSR'
+  | 'SBRAD'
+  | 'STACH'
+  | 'AF'
+  | 'PVC';
 
-export const CLASS_LABELS: Record<ArrhythmiaClass, string> = {
+export const CLASS_LABELS: Record<string, string> = {
   N: 'Normal Sinus Rhythm',
   S: 'Supraventricular Ectopic Beat (SVEB)',
   V: 'Ventricular Ectopic Beat (VEB)',
   F: 'Fusion Beat',
   Q: 'Unclassifiable / Paced Beat',
+  NSR: 'Normal Sinus Rhythm (NSR)',
+  SBRAD: 'Sinus Bradycardia (<60 bpm)',
+  STACH: 'Sinus Tachycardia (>100 bpm)',
+  AF: 'Atrial Fibrillation (AF)',
+  PVC: 'Premature Ventricular Contraction',
 };
 
-export const CLASS_COLORS: Record<ArrhythmiaClass, string> = {
+export const CLASS_COLORS: Record<string, string> = {
   N: '#10b981', // green
   S: '#38bdf8', // light blue
   V: '#f43f5e', // red
   F: '#f59e0b', // amber
   Q: '#a855f7', // purple
+  NSR: '#10b981', // emerald
+  SBRAD: '#38bdf8', // light blue
+  STACH: '#f59e0b', // amber
+  AF: '#a855f7', // purple
+  PVC: '#f43f5e', // rose
 };
 
 export type DecisionStatus = 'ACCEPT' | 'REJECT_QUALITY' | 'ABSTAIN_UNCERTAIN' | 'ABSTAIN_UNFAMILIAR';

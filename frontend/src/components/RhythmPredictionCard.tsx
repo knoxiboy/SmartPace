@@ -7,20 +7,26 @@ interface RhythmPredictionCardProps {
 }
 
 export const RhythmPredictionCard: React.FC<RhythmPredictionCardProps> = ({ prediction }) => {
-  const currentClass: ArrhythmiaClass = prediction?.predicted_class ?? 'N';
+  const currentClass: string = prediction?.predicted_class ?? 'NSR';
   const confidence = prediction?.confidence ?? 0.982;
   const entropy = prediction?.entropy ?? 0.12;
   const uncertainty = prediction?.uncertainty_score ?? 0.08;
 
-  const probabilities = prediction?.probabilities ?? {
-    N: 0.982,
-    S: 0.008,
-    V: 0.004,
-    F: 0.003,
-    Q: 0.003,
+  const probabilities: Record<string, number> = prediction?.probabilities ?? {
+    NSR: 0.982,
+    SBRAD: 0.008,
+    STACH: 0.004,
+    AF: 0.003,
+    PVC: 0.003,
   };
 
-  const isArrhythmia = currentClass !== 'N';
+  const isArrhythmia = currentClass !== 'N' && currentClass !== 'NSR';
+  const labelText = CLASS_LABELS[currentClass] || currentClass;
+  const badgeColor = CLASS_COLORS[currentClass] || '#10b981';
+
+  const displayClasses = Object.keys(probabilities).length > 0
+    ? Object.keys(probabilities)
+    : ['NSR', 'SBRAD', 'STACH', 'AF', 'PVC'];
 
   return (
     <div className="rounded-xl border border-slate-800 bg-[#0f1422] p-4 shadow-md flex flex-col justify-between">
@@ -32,7 +38,7 @@ export const RhythmPredictionCard: React.FC<RhythmPredictionCardProps> = ({ pred
               Rhythm Classification
             </span>
             <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 font-mono">
-              ResNet-1D (AAMI)
+              ResNet-1D (AAMI / 5-Class)
             </span>
           </div>
 
@@ -53,13 +59,13 @@ export const RhythmPredictionCard: React.FC<RhythmPredictionCardProps> = ({ pred
           <div className="flex items-center space-x-3">
             <div
               className="w-10 h-10 rounded-lg flex items-center justify-center font-bold font-mono text-xl text-white shadow-md"
-              style={{ backgroundColor: CLASS_COLORS[currentClass] }}
+              style={{ backgroundColor: badgeColor }}
             >
               {currentClass}
             </div>
             <div>
               <div className="font-semibold text-sm sm:text-base text-white tracking-tight">
-                {CLASS_LABELS[currentClass]}
+                {labelText}
               </div>
               <div className="text-[11px] text-slate-400 font-mono">
                 {isArrhythmia ? 'Pathological Ectopic Arrhythmia' : 'Physiological Sinus Conduction'}
@@ -78,14 +84,16 @@ export const RhythmPredictionCard: React.FC<RhythmPredictionCardProps> = ({ pred
         {/* 5-Class Probability Distribution Bars */}
         <div className="space-y-2 mb-4">
           <div className="flex items-center justify-between text-xs text-slate-400">
-            <span>AAMI 5-Class Probability Distribution</span>
+            <span>5-Class Posterior Distribution</span>
             <span className="font-mono text-[10px]">Softmax Posterior</span>
           </div>
 
-          {(['N', 'S', 'V', 'F', 'Q'] as ArrhythmiaClass[]).map((cls) => {
+          {displayClasses.map((cls) => {
             const prob = probabilities[cls] ?? 0;
             const pct = (prob * 100).toFixed(1);
             const isTarget = cls === currentClass;
+            const classLabel = CLASS_LABELS[cls] || cls;
+            const classColor = CLASS_COLORS[cls] || '#38bdf8';
 
             return (
               <div key={cls} className="space-y-0.5">
@@ -93,10 +101,10 @@ export const RhythmPredictionCard: React.FC<RhythmPredictionCardProps> = ({ pred
                   <span className="flex items-center space-x-1.5">
                     <span
                       className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: CLASS_COLORS[cls] }}
+                      style={{ backgroundColor: classColor }}
                     />
                     <span className={isTarget ? 'text-white font-bold' : 'text-slate-400'}>
-                      {cls} ({CLASS_LABELS[cls].split(' ')[0]})
+                      {cls} ({classLabel.split(' ')[0]})
                     </span>
                   </span>
                   <span className={isTarget ? 'text-emerald-400 font-bold' : 'text-slate-400'}>
@@ -108,7 +116,7 @@ export const RhythmPredictionCard: React.FC<RhythmPredictionCardProps> = ({ pred
                     className="h-full rounded-full transition-all duration-300"
                     style={{
                       width: `${Math.max(1, prob * 100)}%`,
-                      backgroundColor: CLASS_COLORS[cls],
+                      backgroundColor: classColor,
                     }}
                   />
                 </div>
