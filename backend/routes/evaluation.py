@@ -7,15 +7,21 @@ import json
 import os
 from typing import Any, Dict, List
 
+import math
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 
+from smartpace import config as C
+
 router = APIRouter(tags=["Research Evaluation"])
 
-RESULTS_DIR = os.path.join("runs", "first", "results")
 
+def get_results_dir() -> str:
+    res = os.path.join(C.get_active_run_dir(), "results")
+    if os.path.exists(res):
+        return res
+    return os.path.join("runs", "first", "results")
 
-import math
 
 def _clean_val(v):
     if v is None:
@@ -26,7 +32,11 @@ def _clean_val(v):
 
 
 def _read_csv_safe(filename: str) -> List[Dict[str, Any]]:
-    path = os.path.join(RESULTS_DIR, filename)
+    path = os.path.join(get_results_dir(), filename)
+    if not os.path.exists(path):
+        fallback = os.path.join("runs", "first", "results", filename)
+        if os.path.exists(fallback):
+            path = fallback
     if os.path.exists(path):
         try:
             df = pd.read_csv(path)
@@ -99,7 +109,7 @@ async def get_experiment_detail(exp_name: str):
         # Fallback to direct file matching if available
         candidates = [f"{exp_name}.csv", f"{exp_name[:4]}_summary.csv"]
         for c in candidates:
-            if os.path.exists(os.path.join(RESULTS_DIR, c)):
+            if os.path.exists(os.path.join(get_results_dir(), c)):
                 return {
                     "metadata": {
                         "title": exp_name.replace("_", " ").title(),
@@ -124,7 +134,8 @@ async def get_experiment_detail(exp_name: str):
 @router.get("/api/evaluation/overview")
 async def get_evaluation_overview():
     """Summary of all 6 research evaluation experiments and their artifact status."""
-    info_path = os.path.join(RESULTS_DIR, "run_info.json")
+    res_dir = get_results_dir()
+    info_path = os.path.join(res_dir, "run_info.json")
     info = {}
     if os.path.exists(info_path):
         with open(info_path, "r", encoding="utf-8") as f:
@@ -133,12 +144,12 @@ async def get_evaluation_overview():
     return {
         "run_info": info,
         "available_experiments": [
-            {"id": "exp1", "name": "Detection, Uncertainty & Selective Rejection", "ready": os.path.exists(os.path.join(RESULTS_DIR, "exp1_summary.csv"))},
-            {"id": "exp2", "name": "Cross-Dataset Generalization & Adaptation", "ready": os.path.exists(os.path.join(RESULTS_DIR, "exp2_summary.csv"))},
-            {"id": "exp3", "name": "Calibration & Explanation Stress-Testing", "ready": os.path.exists(os.path.join(RESULTS_DIR, "exp3_calibration.csv"))},
-            {"id": "exp4", "name": "Reliability-Aware Noise Rejection (5 Policies)", "ready": os.path.exists(os.path.join(RESULTS_DIR, "exp4_noise.csv"))},
-            {"id": "exp5", "name": "Edge Quantization, Pruning & Confidence Distortion", "ready": os.path.exists(os.path.join(RESULTS_DIR, "exp5_edge.csv"))},
-            {"id": "exp6", "name": "Closed-Loop Alarm Fatigue Decision Simulator", "ready": os.path.exists(os.path.join(RESULTS_DIR, "exp6_simulator.csv"))},
+            {"id": "exp1", "name": "Detection, Uncertainty & Selective Rejection", "ready": os.path.exists(os.path.join(res_dir, "exp1_summary.csv"))},
+            {"id": "exp2", "name": "Cross-Dataset Generalization & Adaptation", "ready": os.path.exists(os.path.join(res_dir, "exp2_summary.csv"))},
+            {"id": "exp3", "name": "Calibration & Explanation Stress-Testing", "ready": os.path.exists(os.path.join(res_dir, "exp3_calibration.csv"))},
+            {"id": "exp4", "name": "Reliability-Aware Noise Rejection (5 Policies)", "ready": os.path.exists(os.path.join(res_dir, "exp4_noise.csv"))},
+            {"id": "exp5", "name": "Edge Quantization, Pruning & Confidence Distortion", "ready": os.path.exists(os.path.join(res_dir, "exp5_edge.csv"))},
+            {"id": "exp6", "name": "Closed-Loop Alarm Fatigue Decision Simulator", "ready": os.path.exists(os.path.join(res_dir, "exp6_simulator.csv"))},
         ],
     }
 
@@ -168,7 +179,10 @@ async def get_exp2_results():
 @router.get("/api/evaluation/exp3")
 async def get_exp3_results():
     """Experiment 3: Calibration, Integrated Gradients completeness, and failure mode AUROC."""
-    exp_json = os.path.join(RESULTS_DIR, "exp3_explanation.json")
+    res_dir = get_results_dir()
+    exp_json = os.path.join(res_dir, "exp3_explanation.json")
+    if not os.path.exists(exp_json):
+        exp_json = os.path.join("runs", "first", "results", "exp3_explanation.json")
     diagnostics = json.load(open(exp_json, "r", encoding="utf-8")) if os.path.exists(exp_json) else {}
     return {
         "calibration": _read_csv_safe("exp3_calibration.csv"),
@@ -209,7 +223,10 @@ async def get_exp6_results():
 @router.get("/api/evaluation/hardware")
 async def get_hardware_info():
     """Hardware specifications and inference runtime environment."""
-    hw_path = os.path.join(RESULTS_DIR, "hardware.json")
+    res_dir = get_results_dir()
+    hw_path = os.path.join(res_dir, "hardware.json")
+    if not os.path.exists(hw_path):
+        hw_path = os.path.join("runs", "first", "results", "hardware.json")
     if os.path.exists(hw_path):
         with open(hw_path, "r", encoding="utf-8") as f:
             return json.load(f)

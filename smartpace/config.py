@@ -47,3 +47,21 @@ PTBXL_TEST_FOLD = 10
 SNR_LEVELS = [24, 18, 12, 6, 0, -6]
 NOISE_KINDS = ["bw", "em", "ma"]          # baseline wander, electrode motion, muscle artifact
 NOISE_NAMES = {"bw": "Baseline wander", "em": "Electrode motion", "ma": "Muscle artifact"}
+
+# --- Run Directories & Model Registry -------------------------------------------
+import os as _os
+
+RUNS_DIR = _os.environ.get("SMARTPACE_RUNS_DIR", "runs")
+
+
+def get_active_run_dir(default="full") -> str:
+    """Returns the primary run directory, preferring runs/full if it has run_info.json,
+    falling back to runs/first, or the specified default."""
+    candidate_full = _os.path.join(RUNS_DIR, "full")
+    if _os.path.exists(_os.path.join(candidate_full, "results", "run_info.json")):
+        return candidate_full
+    candidate_first = _os.path.join(RUNS_DIR, "first")
+    if _os.path.exists(_os.path.join(candidate_first, "results", "run_info.json")):
+        return candidate_first
+    return _os.path.join(RUNS_DIR, default)
+

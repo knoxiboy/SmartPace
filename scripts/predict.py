@@ -75,7 +75,7 @@ def read_input(a):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--run", default="runs/first")
+    ap.add_argument("--run", default=C.get_active_run_dir(), help="run directory containing models (default: active run)")
     ap.add_argument("--data-dir", default="data")
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--wfdb"); g.add_argument("--csv"); g.add_argument("--npy"); g.add_argument("--npz")

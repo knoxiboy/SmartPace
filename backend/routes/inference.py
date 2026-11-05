@@ -69,8 +69,14 @@ async def analyze_single_window(req: WindowInferenceRequest, request: Request):
 @router.get("/api/models")
 async def list_models(request: Request):
     """Lists all available model checkpoints and edge ONNX variants."""
-    models_dir = os.path.join("runs", "first", "models")
-    edge_dir = os.path.join("runs", "first", "edge")
+    active_run = C.get_active_run_dir()
+    models_dir = os.path.join(active_run, "models")
+    if not os.path.exists(models_dir):
+        models_dir = os.path.join("runs", "first", "models")
+
+    edge_dir = os.path.join(active_run, "edge")
+    if not os.path.exists(edge_dir):
+        edge_dir = os.path.join("runs", "first", "edge")
 
     checkpoints = []
     if os.path.exists(models_dir):
@@ -107,9 +113,19 @@ async def list_models(request: Request):
 @router.post("/api/models/select")
 async def select_model(req: ModelSelectRequest, request: Request):
     """Switches active PyTorch model checkpoint."""
-    models_dir = os.path.join("runs", "first", "models")
-    target_path = os.path.join(models_dir, req.model_name)
-    if not os.path.exists(target_path):
+    active_run = C.get_active_run_dir()
+    candidates = [
+        os.path.join(active_run, "models", req.model_name),
+        os.path.join("runs", "full", "models", req.model_name),
+        os.path.join("runs", "first", "models", req.model_name),
+    ]
+    target_path = None
+    for c in candidates:
+        if os.path.exists(c):
+            target_path = c
+            break
+
+    if not target_path:
         raise HTTPException(status_code=404, detail=f"Model checkpoint '{req.model_name}' not found")
 
     try:

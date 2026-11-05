@@ -359,7 +359,10 @@ async def get_stored_failure_cases(request: Request):
 @router.get("/api/explain/diagnostics")
 async def get_explanation_diagnostics():
     """Returns the benchmark explanation evaluation summary."""
-    json_path = os.path.join("runs", "first", "results", "exp3_explanation.json")
+    res_dir = os.path.join(C.get_active_run_dir(), "results")
+    json_path = os.path.join(res_dir, "exp3_explanation.json")
+    if not os.path.exists(json_path):
+        json_path = os.path.join("runs", "first", "results", "exp3_explanation.json")
     if not os.path.exists(json_path):
         return {"diagnostics": None}
     with open(json_path, "r", encoding="utf-8") as f:

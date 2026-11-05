@@ -40,9 +40,18 @@ def run_fp32_vs_int8_benchmark(
         Structured dictionary containing measured latency percentiles, speedup,
         prediction agreement, and probability drift.
     """
-    pt_path = model_path or os.path.join("runs", "first", "models", "resnet1d_AB_s0.pt")
-    int8_path = onnx_path or os.path.join("runs", "first", "edge", "resnet1d_int8.onnx")
-    ds_path = data_path or os.path.join("runs", "first", "edge", "test_subset.npz")
+    active_run = C.get_active_run_dir()
+    pt_path = model_path or os.path.join(active_run, "models", "resnet1d_AB_s0.pt")
+    if not os.path.exists(pt_path):
+        pt_path = os.path.join("runs", "first", "models", "resnet1d_AB_s0.pt")
+
+    int8_path = onnx_path or os.path.join(active_run, "edge", "resnet1d_int8.onnx")
+    if not os.path.exists(int8_path):
+        int8_path = os.path.join("runs", "first", "edge", "resnet1d_int8.onnx")
+
+    ds_path = data_path or os.path.join(active_run, "edge", "test_subset.npz")
+    if not os.path.exists(ds_path):
+        ds_path = os.path.join("runs", "first", "edge", "test_subset.npz")
     dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
     # 1. Verify existence of required artifacts

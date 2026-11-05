@@ -286,10 +286,19 @@ def _clean_dict(d_list):
 
 @router.get("/api/stress/tradeoff_curves")
 async def get_tradeoff_curves():
-    """Loads precomputed risk-coverage trade-off curves from runs/first/results/."""
-    p_curves = os.path.join("runs", "first", "results", "exp4_tradeoff_curves.csv")
-    p_breakdown = os.path.join("runs", "first", "results", "exp4_noise_type_rejection.csv")
-    p_transfer = os.path.join("runs", "first", "results", "exp4_cross_noise_transfer.csv")
+    """Loads precomputed risk-coverage trade-off curves from active results dir."""
+    res_dir = os.path.join(C.get_active_run_dir(), "results")
+    p_curves = os.path.join(res_dir, "exp4_tradeoff_curves.csv")
+    if not os.path.exists(p_curves):
+        p_curves = os.path.join("runs", "first", "results", "exp4_tradeoff_curves.csv")
+
+    p_breakdown = os.path.join(res_dir, "exp4_noise_type_rejection.csv")
+    if not os.path.exists(p_breakdown):
+        p_breakdown = os.path.join("runs", "first", "results", "exp4_noise_type_rejection.csv")
+
+    p_transfer = os.path.join(res_dir, "exp4_cross_noise_transfer.csv")
+    if not os.path.exists(p_transfer):
+        p_transfer = os.path.join("runs", "first", "results", "exp4_cross_noise_transfer.csv")
 
     curves_list = []
     if os.path.exists(p_curves):

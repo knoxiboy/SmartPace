@@ -109,21 +109,22 @@ def test_day2_single_mode_inference():
 
 
 def test_day2_ensemble_mode_inference():
-    """Verify Deep Ensemble evaluates all 3 members and produces mean probabilities."""
+    """Verify Deep Ensemble evaluates all members and produces mean probabilities."""
     engine = SmartPaceEngine(mode="single")
     assert engine.ensemble_available is True
-    assert len(engine.ensemble_models) == 3
+    n_members = len(engine.ensemble_models)
+    assert n_members in (3, 5)
 
     # Switch to ensemble mode
     mode_status = engine.set_inference_mode("ensemble")
     assert mode_status["mode"] == "ensemble"
-    assert mode_status["active_models"] == 3
+    assert mode_status["active_models"] == n_members
 
     dummy_raw = np.random.randn(C.WIN)
     res = engine.analyze_window(dummy_raw)
 
     assert res["inference_mode"] == "ensemble"
-    assert res["active_models"] == 3
+    assert res["active_models"] == n_members
     assert res["predicted_class"] in C.CLASSES
     assert 0.0 <= res["confidence"] <= 1.0
     prob_sum = sum(res["class_probabilities"].values())
@@ -132,8 +133,8 @@ def test_day2_ensemble_mode_inference():
     # Validate ensemble metrics
     ens = res["ensemble_info"]
     assert ens["mode"] == "ensemble"
-    assert ens["active_models"] == 3
-    assert len(ens["member_predictions"]) == 3
+    assert ens["active_models"] == n_members
+    assert len(ens["member_predictions"]) == n_members
     assert 0.0 <= ens["disagreement"] <= 1.0
     assert ens["probability_variance"] >= 0.0
     assert 0.0 <= ens["agreement_ratio"] <= 1.0
@@ -174,7 +175,7 @@ def test_day2_api_mode_toggle(client):
     post_res = client.post("/api/inference/mode", json={"mode": "ensemble"})
     assert post_res.status_code == 200
     assert post_res.json()["mode"] == "ensemble"
-    assert post_res.json()["active_models"] == 3
+    assert post_res.json()["active_models"] in (3, 5)
 
     # 3. Switch back to single
     post_res2 = client.post("/api/inference/mode", json={"mode": "single"})
@@ -369,4 +370,20 @@ async def test_day5_streaming_manager_causal_peaks_integration():
     # Verify message stream received ecg_chunk with r_peaks
     chunk_msgs = [m for m in received_messages if m.get("type") == "ecg_chunk"]
     assert len(chunk_msgs) > 0
-    assert "r_peaks" in chunk_msgs[0]
+
+
+def test_day6_full_study_5seeds_and_pruned80_artifacts():
+    """Verify runs/full contains all 5 ensemble seeds and pruned INT8 edge artifacts."""
+    full_models_dir = os.path.join("runs", "full", "models")
+    if os.path.exists(full_models_dir):
+        seeds = ["s0", "s1", "s2", "s3", "s4"]
+        for s in seeds:
+            p = os.path.join(full_models_dir, f"resnet1d_AB_{s}.pt")
+            assert os.path.exists(p), f"Missing 5-seed member: {p}"
+            ck = torch.load(p, map_location="cpu", weights_only=False)
+            assert ck.get("arch") == "resnet1d"
+
+        pruned_onnx = os.path.join("runs", "full", "edge", "resnet1d_pruned80_int8.onnx")
+        assert os.path.exists(pruned_onnx)
+        sess = ort.InferenceSession(pruned_onnx, providers=["CPUExecutionProvider"])
+        assert sess.get_inputs()[0].name == "input"

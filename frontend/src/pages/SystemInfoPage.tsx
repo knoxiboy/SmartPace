@@ -76,7 +76,7 @@ export const SystemInfoPage: React.FC = () => {
             <div className="flex justify-between py-1 border-b border-slate-800/60">
               <span className="text-slate-400">Checkpoint File:</span>
               <span className="text-slate-300 text-[11px] truncate max-w-xs">
-                {systemInfo?.active_model?.checkpoint || 'runs/first/models/resnet1d_AB_s0.pt'}
+                {systemInfo?.active_model?.checkpoint || 'runs/full/models/resnet1d_AB_s0.pt'}
               </span>
             </div>
             <div className="flex justify-between py-1 border-b border-slate-800/60">

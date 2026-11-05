@@ -114,7 +114,7 @@ export const LiveMonitorPage: React.FC<LiveMonitorPageProps> = ({
               title={
                 !inferenceModeInfo?.ensemble_available
                   ? inferenceModeInfo?.ensemble_unavailable_reason || 'Ensemble checkpoints missing'
-                  : '3-Member Deep Ensemble'
+                  : `${inferenceModeInfo?.active_models || 5}-Member Deep Ensemble`
               }
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-all ${
                 inferenceMode === 'ensemble'
@@ -125,7 +125,7 @@ export const LiveMonitorPage: React.FC<LiveMonitorPageProps> = ({
               }`}
             >
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Deep Ensemble (3 Models)</span>
+              <span>Deep Ensemble ({inferenceModeInfo?.active_models || 5} Models)</span>
             </button>
           </div>
 
@@ -163,7 +163,9 @@ export const LiveMonitorPage: React.FC<LiveMonitorPageProps> = ({
                 inferenceMode === 'ensemble' ? 'bg-purple-400 animate-pulse' : 'bg-blue-400'
               }`}
             ></span>
-            {inferenceMode === 'ensemble' ? '3 Loaded Members (s0, s1, s2)' : '1 Model (s0)'}
+            {inferenceMode === 'ensemble'
+              ? `${inferenceModeInfo?.active_models || 5} Loaded Members (${inferenceModeInfo?.ensemble_members?.map((m: string) => m.split('_').pop()?.replace('.pt','')).filter(Boolean).join(', ') || 's0–s4'})`
+              : '1 Model (s0)'}
           </span>
 
           {inferenceMode === 'ensemble' && latestEnsembleInfo && (

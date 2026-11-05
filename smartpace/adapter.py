@@ -24,8 +24,17 @@ class SmartPaceEngine:
     ):
         self._lock = threading.RLock()
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.model_path = model_path or os.path.join("runs", "first", "models", "resnet1d_AB_s0.pt")
-        self.edge_onnx_path = edge_onnx_path or os.path.join("runs", "first", "edge", "resnet1d_int8.onnx")
+        active_run = C.get_active_run_dir()
+        self.model_path = model_path or os.path.join(active_run, "models", "resnet1d_AB_s0.pt")
+        if not os.path.exists(self.model_path):
+            self.model_path = os.path.join("runs", "first", "models", "resnet1d_AB_s0.pt")
+
+        default_edge = os.path.join(active_run, "edge", "resnet1d_pruned80_int8.onnx")
+        if not os.path.exists(default_edge):
+            default_edge = os.path.join(active_run, "edge", "resnet1d_int8.onnx")
+        if not os.path.exists(default_edge):
+            default_edge = os.path.join("runs", "first", "edge", "resnet1d_int8.onnx")
+        self.edge_onnx_path = edge_onnx_path or default_edge
         self.data_cache_path = data_cache_path or os.path.join("data", "cache", "mitbih.npz")
 
         self.mode: str = mode
@@ -33,7 +42,7 @@ class SmartPaceEngine:
         self.meta: Dict[str, Any] = {}
         self.arch: str = "resnet1d"
 
-        # Deep Ensemble members (s0, s1, s2)
+        # Deep Ensemble members (s0 to s4)
         self.ensemble_models: List[torch.nn.Module] = []
         self.ensemble_paths: List[str] = []
         self.ensemble_available: bool = False
@@ -87,9 +96,9 @@ class SmartPaceEngine:
                     p.requires_grad = False
                 self.arch = "resnet1d"
 
-            # 2. Discover and load Deep Ensemble members (s0, s1, s2)
+            # 2. Discover and load Deep Ensemble members (s0 to s4)
             models_dir = os.path.dirname(self.model_path)
-            candidate_seeds = ["s0", "s1", "s2"]
+            candidate_seeds = ["s0", "s1", "s2", "s3", "s4"]
             loaded_members = []
             loaded_paths = []
             missing_members = []
@@ -99,10 +108,11 @@ class SmartPaceEngine:
                 expected_filename = f"{self.arch}_AB_{s}.pt"
                 candidate_path = os.path.join(models_dir, expected_filename)
                 if not os.path.exists(candidate_path):
-                    # Check runs/first/models/
-                    alt_path = os.path.join("runs", "first", "models", expected_filename)
-                    if os.path.exists(alt_path):
-                        candidate_path = alt_path
+                    for alt_dir in [os.path.join("runs", "full", "models"), os.path.join("runs", "first", "models")]:
+                        alt_path = os.path.join(alt_dir, expected_filename)
+                        if os.path.exists(alt_path):
+                            candidate_path = alt_path
+                            break
 
                 if os.path.exists(candidate_path):
                     try:
@@ -126,7 +136,7 @@ class SmartPaceEngine:
                 else:
                     missing_members.append(candidate_path)
 
-            if len(loaded_members) == 3 and not missing_members:
+            if len(loaded_members) >= 3:
                 self.ensemble_models = loaded_members
                 self.ensemble_paths = loaded_paths
                 self.ensemble_available = True
@@ -136,7 +146,7 @@ class SmartPaceEngine:
                 self.ensemble_paths = loaded_paths
                 self.ensemble_available = False
                 self.ensemble_unavailable_reason = (
-                    f"Ensemble requires 3 verified checkpoints; available: {len(loaded_members)}/3. Issues: {missing_members}"
+                    f"Ensemble requires at least 3 verified checkpoints; available: {len(loaded_members)}/5. Issues: {missing_members}"
                 )
 
             # 3. Setup SQI Gate
@@ -325,7 +335,7 @@ class SmartPaceEngine:
                 edge_probs = softmax(edge_logits, axis=1)[0]
                 edge_pred_idx = int(np.argmax(edge_probs))
                 edge_metrics = {
-                    "edge_variant": "resnet1d_int8",
+                    "edge_variant": os.path.basename(self.edge_onnx_path).replace(".onnx", ""),
                     "edge_pred_class": C.CLASSES[edge_pred_idx],
                     "edge_confidence": float(edge_probs[edge_pred_idx]),
                     "edge_latency_ms": float(edge_lat_ms),

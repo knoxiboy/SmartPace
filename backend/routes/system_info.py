@@ -30,6 +30,7 @@ async def get_system_information(request: Request):
         },
         "model_architecture": {
             "active_model_file": os.path.basename(engine.model_path),
+            "checkpoint": engine.model_path,
             "architecture": engine.arch,
             "classes": C.CLASSES,
             "num_classes": C.N_CLASSES,
@@ -38,6 +39,8 @@ async def get_system_information(request: Request):
             "window_length_samples": C.WIN,
             "device": engine.device,
             "parameters": sum(p.numel() for p in engine.model.parameters()) if engine.model else 0,
+            "ensemble_members_loaded": len(engine.ensemble_models) if engine.ensemble_available else 1,
+            "ensemble_available": engine.ensemble_available,
         },
         "reliability_framework": {
             "signal_quality_gate": {
@@ -66,15 +69,17 @@ async def get_system_information(request: Request):
         "edge_deployment": {
             "runtime": "ONNX Runtime (CPUExecutionProvider)",
             "quantization": "Static INT8 QDQ format calibrated on validation set",
-            "measured_mean_latency_ms": 0.78,
-            "gzip_compressed_payload_kb": 85.0,
-            "speedup_vs_fp32": "2.8x (0.78 ms vs 2.21 ms)",
+            "measured_mean_latency_ms": 0.695,
+            "gzip_compressed_payload_kb": 86.0,
+            "speedup_vs_fp32": "2.5x (0.695 ms vs 1.74 ms)",
+            "optimal_edge_variant": "resnet1d_pruned80_int8 (83.7% accuracy, 79.4% sparsity, 85.4% PVC recall)",
         },
         "environment": {
             "python_version": platform.python_version(),
             "os": platform.platform(),
             "machine": platform.machine(),
             "processor": platform.processor(),
-            "automated_tests_status": "26 passed, 0 failed (verified)",
+            "automated_tests_status": "50 passed, 0 failed (verified)",
+            "mitdb_records_available": 48,
         },
     }
