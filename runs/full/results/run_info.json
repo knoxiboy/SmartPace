@@ -1,0 +1,32 @@
+{
+  "synthetic": false,
+  "noise_source": "NSTDB",
+  "main_train": "AB",
+  "args": {
+    "data_dir": "data",
+    "out": "runs/full",
+    "synthetic": false,
+    "quick": false,
+    "steps": "1,2,3,4,5,6",
+    "seeds": 5,
+    "epochs": 30,
+    "batch_size": 128,
+    "patience": 8,
+    "mc_T": 20,
+    "reject_coverage": 0.95,
+    "ptbxl_max": 4000,
+    "ptbxl_res": 100,
+    "with_transformer": true,
+    "expl_per_class": 20,
+    "ig_steps": 32,
+    "noise_n": 2000,
+    "prune_epochs": 4,
+    "prune_n": 6000,
+    "sqi_q": 1.0,
+    "threads": 1,
+    "main_train": "AB",
+    "sqi_n": 2000,
+    "burst_snr": 0.0
+  },
+  "total_seconds": 28178
+}

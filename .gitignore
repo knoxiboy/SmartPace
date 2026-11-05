@@ -1,5 +1,17 @@
+# Byte-compiled / cache / virtualenv
 __pycache__/
 *.pyc
-data/
-runs/
 .pytest_cache/
+.venv/
+*.db
+*.sqlite3
+
+# Large raw datasets and local caches
+data/cache/
+data/ptb-xl/
+data/uploads/*
+!data/uploads/.gitkeep
+
+# Ignore intermediate/scratch experimental runs, track full verified study artifacts
+runs/*
+!runs/full/

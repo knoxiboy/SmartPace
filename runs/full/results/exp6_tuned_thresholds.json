@@ -1,0 +1,13 @@
+{
+  "hr_rule(lo,hi)": [
+    60,
+    100
+  ],
+  "hr_rr_rule(lo,hi,cv)": [
+    60,
+    100,
+    0.15
+  ],
+  "tau_risk": 0.5,
+  "tau_uncertainty": 0.8972345113754269
+}

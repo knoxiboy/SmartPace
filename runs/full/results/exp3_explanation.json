@@ -1,0 +1,50 @@
+{
+  "summary": {
+    "n_windows": 100,
+    "ig_steps": 32,
+    "completeness_gap": 0.004422451369464397,
+    "spearman": 0.9508713150859706,
+    "topk_jaccard": 0.7462605981850539,
+    "deletion_auc_ig": 0.4447232484817505,
+    "deletion_auc_random": 0.6679324299097061,
+    "insertion_auc_ig": 0.4876154690980911,
+    "insertion_auc_random": 0.30508048087358475,
+    "failure_mode_counts": {
+      "Case A: Correct, stable explanation": 73,
+      "Case D: Standard / intermediate": 27
+    },
+    "error_warning_auroc": {
+      "auroc_confidence_only": 0.6688000000000001,
+      "auroc_explanation_instability_only": 0.6565333333333333,
+      "auroc_combined_warning": 0.7552,
+      "auroc_gain_over_confidence": 0.08639999999999992
+    }
+  },
+  "plausibility_enrichment": {
+    "NSR": {
+      "P": 0.6383755641670572,
+      "QRS": 2.3656297603371965,
+      "T": 0.8901423534077192
+    },
+    "SBRAD": {
+      "P": 0.6626079299780071,
+      "QRS": 1.1771136543777005,
+      "T": 0.7037476066937951
+    },
+    "AF": {
+      "P": 0.7176466209206298,
+      "QRS": 1.179972699628121,
+      "T": 1.110847088058138
+    },
+    "STACH": {
+      "P": 0.39160654851511306,
+      "QRS": 1.5687082774516437,
+      "T": 0.8106234582487655
+    },
+    "PVC": {
+      "P": 0.532482985248277,
+      "QRS": 1.5446741986932135,
+      "T": 1.3578070868748322
+    }
+  }
+}

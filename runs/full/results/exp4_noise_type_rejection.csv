@@ -1,0 +1,58 @@
+noise_kind,snr_db,rejection_rate,n_samples,policy
+bw,-6.0,0.158,2000,3. Fixed Dual-Gate (Baseline)
+bw,0.0,0.087,2000,3. Fixed Dual-Gate (Baseline)
+bw,6.0,0.0785,2000,3. Fixed Dual-Gate (Baseline)
+bw,12.0,0.076,2000,3. Fixed Dual-Gate (Baseline)
+bw,18.0,0.077,2000,3. Fixed Dual-Gate (Baseline)
+bw,24.0,0.0775,2000,3. Fixed Dual-Gate (Baseline)
+em,-6.0,0.7665,2000,3. Fixed Dual-Gate (Baseline)
+em,0.0,0.368,2000,3. Fixed Dual-Gate (Baseline)
+em,6.0,0.141,2000,3. Fixed Dual-Gate (Baseline)
+em,12.0,0.104,2000,3. Fixed Dual-Gate (Baseline)
+em,18.0,0.085,2000,3. Fixed Dual-Gate (Baseline)
+em,24.0,0.0795,2000,3. Fixed Dual-Gate (Baseline)
+ma,-6.0,0.8255,2000,3. Fixed Dual-Gate (Baseline)
+ma,0.0,0.418,2000,3. Fixed Dual-Gate (Baseline)
+ma,6.0,0.1345,2000,3. Fixed Dual-Gate (Baseline)
+ma,12.0,0.091,2000,3. Fixed Dual-Gate (Baseline)
+ma,18.0,0.0795,2000,3. Fixed Dual-Gate (Baseline)
+ma,24.0,0.0765,2000,3. Fixed Dual-Gate (Baseline)
+clean,,0.077,2000,3. Fixed Dual-Gate (Baseline)
+bw,-6.0,0.2425,2000,4. Val-Calibrated Dual Gate
+bw,0.0,0.115,2000,4. Val-Calibrated Dual Gate
+bw,6.0,0.0815,2000,4. Val-Calibrated Dual Gate
+bw,12.0,0.0725,2000,4. Val-Calibrated Dual Gate
+bw,18.0,0.069,2000,4. Val-Calibrated Dual Gate
+bw,24.0,0.0685,2000,4. Val-Calibrated Dual Gate
+em,-6.0,0.5795,2000,4. Val-Calibrated Dual Gate
+em,0.0,0.317,2000,4. Val-Calibrated Dual Gate
+em,6.0,0.157,2000,4. Val-Calibrated Dual Gate
+em,12.0,0.1125,2000,4. Val-Calibrated Dual Gate
+em,18.0,0.087,2000,4. Val-Calibrated Dual Gate
+em,24.0,0.075,2000,4. Val-Calibrated Dual Gate
+ma,-6.0,0.9045,2000,4. Val-Calibrated Dual Gate
+ma,0.0,0.463,2000,4. Val-Calibrated Dual Gate
+ma,6.0,0.144,2000,4. Val-Calibrated Dual Gate
+ma,12.0,0.0915,2000,4. Val-Calibrated Dual Gate
+ma,18.0,0.0775,2000,4. Val-Calibrated Dual Gate
+ma,24.0,0.073,2000,4. Val-Calibrated Dual Gate
+clean,,0.0695,2000,4. Val-Calibrated Dual Gate
+bw,-6.0,0.2295,2000,5. Adaptive Reliability Policy (SmartPace)
+bw,0.0,0.134,2000,5. Adaptive Reliability Policy (SmartPace)
+bw,6.0,0.0915,2000,5. Adaptive Reliability Policy (SmartPace)
+bw,12.0,0.0835,2000,5. Adaptive Reliability Policy (SmartPace)
+bw,18.0,0.081,2000,5. Adaptive Reliability Policy (SmartPace)
+bw,24.0,0.0815,2000,5. Adaptive Reliability Policy (SmartPace)
+em,-6.0,0.647,2000,5. Adaptive Reliability Policy (SmartPace)
+em,0.0,0.4355,2000,5. Adaptive Reliability Policy (SmartPace)
+em,6.0,0.2045,2000,5. Adaptive Reliability Policy (SmartPace)
+em,12.0,0.1445,2000,5. Adaptive Reliability Policy (SmartPace)
+em,18.0,0.1035,2000,5. Adaptive Reliability Policy (SmartPace)
+em,24.0,0.087,2000,5. Adaptive Reliability Policy (SmartPace)
+ma,-6.0,0.629,2000,5. Adaptive Reliability Policy (SmartPace)
+ma,0.0,0.358,2000,5. Adaptive Reliability Policy (SmartPace)
+ma,6.0,0.1525,2000,5. Adaptive Reliability Policy (SmartPace)
+ma,12.0,0.0945,2000,5. Adaptive Reliability Policy (SmartPace)
+ma,18.0,0.0825,2000,5. Adaptive Reliability Policy (SmartPace)
+ma,24.0,0.0795,2000,5. Adaptive Reliability Policy (SmartPace)
+clean,,0.081,2000,5. Adaptive Reliability Policy (SmartPace)
