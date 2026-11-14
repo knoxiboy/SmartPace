@@ -42,9 +42,10 @@ export const RhythmPredictionCard: React.FC<RhythmPredictionCardProps> = ({ pred
             </span>
           </div>
 
-          <div className="flex items-center space-x-1.5">
+          <div className="flex items-center space-x-1.5" title="Platt Temperature Scaling calibrated on Division A validation set to eliminate overconfidence">
             <span className="text-[11px] text-slate-400 font-mono">T-Scaled:</span>
-            <span className="text-[11px] text-emerald-400 font-mono font-semibold">T=1.42</span>
+            <span className="text-[11px] text-emerald-400 font-mono font-semibold">T=0.91</span>
+            <span className="text-[9px] bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 px-1 py-0.2 rounded font-mono">Calibrated</span>
           </div>
         </div>
 
@@ -128,23 +129,29 @@ export const RhythmPredictionCard: React.FC<RhythmPredictionCardProps> = ({ pred
 
       {/* Uncertainty & Entropy Telemetry */}
       <div className="pt-3 border-t border-slate-800/80 grid grid-cols-2 gap-2 text-xs font-mono">
-        <div className="bg-slate-900/60 p-2 rounded border border-slate-800">
-          <div className="text-[10px] text-slate-500 uppercase">Shannon Entropy</div>
+        <div className="bg-slate-900/60 p-2 rounded border border-slate-800" title="Shannon Entropy: Measures aleatoric ambiguity across the 5 predicted classes">
+          <div className="text-[10px] text-slate-500 uppercase flex items-center justify-between">
+            <span>Shannon Entropy</span>
+            <span className="text-[9px] text-slate-500 lowercase">H(p)</span>
+          </div>
           <div className="text-sm font-bold text-slate-200 mt-0.5">
             {entropy.toFixed(3)} <span className="text-[10px] text-slate-500">nats</span>
           </div>
           <div className="text-[10px] text-emerald-400">
-            {entropy < 0.3 ? 'Low Dispersal' : 'High Ambiguity'}
+            {entropy < 0.3 ? 'Low Dispersal (Certain)' : 'High Ambiguity (Abstain)'}
           </div>
         </div>
 
-        <div className="bg-slate-900/60 p-2 rounded border border-slate-800">
-          <div className="text-[10px] text-slate-500 uppercase">MC Uncertainty</div>
+        <div className="bg-slate-900/60 p-2 rounded border border-slate-800" title="MC Uncertainty: Measures epistemic uncertainty via Monte Carlo dropout dispersion">
+          <div className="text-[10px] text-slate-500 uppercase flex items-center justify-between">
+            <span>MC Uncertainty</span>
+            <span className="text-[9px] text-slate-500 lowercase">σ_mc</span>
+          </div>
           <div className="text-sm font-bold text-slate-200 mt-0.5">
             {uncertainty.toFixed(3)}
           </div>
           <div className="text-[10px] text-sky-400">
-            {uncertainty < 0.2 ? 'Deterministic' : 'Epistemic Spread'}
+            {uncertainty < 0.2 ? 'Deterministic Weights' : 'High Variance (Abstain)'}
           </div>
         </div>
       </div>

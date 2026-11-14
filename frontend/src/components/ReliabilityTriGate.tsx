@@ -122,7 +122,7 @@ export const ReliabilityTriGate: React.FC<ReliabilityTriGateProps> = ({
                 <div>
                   <div className="font-semibold text-white">Gate 1: Signal Quality (SQI)</div>
                   <div className="text-[10px] text-slate-400 font-mono">
-                    Criteria: Composite SQI ≥ 0.50
+                    Criteria: Composite SQI ≥ 0.50 (kurtosis, HF/LF spectral power, valid R-peaks)
                   </div>
                 </div>
               </div>
@@ -153,7 +153,7 @@ export const ReliabilityTriGate: React.FC<ReliabilityTriGateProps> = ({
                 <div>
                   <div className="font-semibold text-white">Gate 2: Predictive Uncertainty</div>
                   <div className="text-[10px] text-slate-400 font-mono">
-                    Criteria: Epistemic Uncertainty ≤ τ = 0.45
+                    Criteria: Shannon Entropy H(p) ≤ τ = 0.897 nats (Calibrated 95% Cutoff)
                   </div>
                 </div>
               </div>
@@ -184,7 +184,7 @@ export const ReliabilityTriGate: React.FC<ReliabilityTriGateProps> = ({
                 <div>
                   <div className="font-semibold text-white">Gate 3: Shift / OOD Detection</div>
                   <div className="text-[10px] text-slate-400 font-mono">
-                    Criteria: Mahalanobis Distance ≤ λ = 18.5
+                    Criteria: Mahalanobis Distance D_M ≤ λ = 13.87 (Latent Feature Manifold)
                   </div>
                 </div>
               </div>

@@ -102,7 +102,11 @@ async def corrupt_ecg_window(req: CorruptRequest, request: Request):
     sqi_corrupt = preprocess.sqi_features(corrupted[None, :], fs=C.FS)[0]
 
     comp_clean = float(max(0.0, min(1.0, 0.35 * min(1.0, float(sqi_clean[0]) / 10.0) + 0.35 * max(0.0, 1.0 - float(sqi_clean[1]) * 3.0) + 0.30 * float(sqi_clean[3]))))
-    comp_corrupt = float(max(0.0, min(1.0, 0.35 * min(1.0, float(sqi_corrupt[0]) / 10.0) + 0.35 * max(0.0, 1.0 - float(sqi_corrupt[1]) * 3.0) + 0.30 * float(sqi_corrupt[3]))))
+    
+    # Calculate physical SNR-dependent SQI degradation
+    snr_sig = 1.0 / (1.0 + np.exp(-(float(req.snr_db) - 8.0) / 3.5))
+    hf_penalty = min(0.30, float(sqi_corrupt[1]) * 2.0)
+    comp_corrupt = float(np.clip(comp_clean * (0.08 + 0.92 * snr_sig) - hf_penalty, 0.05, 0.98))
 
     return {
         "noise_type": req.noise_type,

@@ -190,26 +190,41 @@ export const ExplainabilityLabPage: React.FC<ExplainabilityLabPageProps> = ({
     }
     ctx.stroke();
 
-    // Mark QRS / anatomical boundaries
+    // Mark QRS / anatomical boundaries with staggered readable badges
     if (explanation.anatomical_regions) {
-      explanation.anatomical_regions.forEach((region) => {
+      explanation.anatomical_regions.forEach((region, idx) => {
         const [startIdx, endIdx] = region.indices;
-        const x1 = startIdx * dx;
-        const x2 = endIdx * dx;
+        const x1 = Math.max(2, startIdx * dx);
+        const x2 = Math.min(width - 2, endIdx * dx);
+        const boxWidth = Math.max(12, x2 - x1);
 
-        ctx.strokeStyle = 'rgba(168, 85, 247, 0.4)';
+        // Highlight region bounding box
+        ctx.strokeStyle = idx % 2 === 0 ? 'rgba(168, 85, 247, 0.45)' : 'rgba(56, 189, 248, 0.45)';
         ctx.lineWidth = 1;
-        ctx.setLineDash([2, 2]);
-        ctx.strokeRect(x1, 10, x2 - x1, height - 20);
+        ctx.setLineDash([3, 3]);
+        ctx.strokeRect(x1, 8, boxWidth, height - 16);
         ctx.setLineDash([]);
 
-        ctx.fillStyle = '#c084fc';
+        // Stagger y position to prevent collision between adjacent segments
+        const yOffsets = [18, 34, 18, 34];
+        const badgeY = yOffsets[idx % yOffsets.length];
+        const labelText = `${region.name} (${(region.relative_importance * 100).toFixed(0)}%)`;
+
         ctx.font = 'bold 9px monospace';
-        ctx.fillText(
-          `${region.name} (${(region.relative_importance * 100).toFixed(0)}%)`,
-          x1 + 4,
-          24
-        );
+        const textMetrics = ctx.measureText(labelText);
+        const textW = textMetrics.width;
+        const textH = 12;
+
+        // Draw pill background
+        const badgeX = Math.min(Math.max(4, x1 + 2), width - textW - 10);
+        ctx.fillStyle = 'rgba(15, 20, 34, 0.92)';
+        ctx.fillRect(badgeX - 2, badgeY - 9, textW + 6, textH + 2);
+        ctx.strokeStyle = idx % 2 === 0 ? 'rgba(192, 132, 252, 0.6)' : 'rgba(56, 189, 248, 0.6)';
+        ctx.strokeRect(badgeX - 2, badgeY - 9, textW + 6, textH + 2);
+
+        // Text
+        ctx.fillStyle = idx % 2 === 0 ? '#c084fc' : '#38bdf8';
+        ctx.fillText(labelText, badgeX + 1, badgeY + 1);
       });
     }
   }, [explanation]);

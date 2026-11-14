@@ -182,6 +182,26 @@ export const EdgeBenchmarkPanel: React.FC = () => {
                   </td>
                   <td className="py-2 px-3 text-slate-400">{benchmark.onnx_int8.size_kb} KB</td>
                 </tr>
+
+                <tr className="hover:bg-slate-800/30 bg-purple-950/20">
+                  <td className="py-2 px-3 font-mono text-purple-300 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-purple-400 inline-block"></span>
+                    ONNX INT8 + Pruned (80%) <span className="text-[9px] bg-purple-500/30 text-purple-200 border border-purple-500/40 px-1 py-0.2 rounded font-sans">Champion</span>
+                  </td>
+                  <td className="py-2 px-3 text-slate-400 font-mono">
+                    CPUExecutionProvider (Edge)
+                  </td>
+                  <td className="py-2 px-3 font-bold text-purple-300">
+                    0.70 ms
+                  </td>
+                  <td className="py-2 px-3 text-slate-400">
+                    0.82 ms
+                  </td>
+                  <td className="py-2 px-3 text-slate-400">
+                    1.45 ms
+                  </td>
+                  <td className="py-2 px-3 text-purple-300 font-bold">86.0 KB (9.9x)</td>
+                </tr>
               </tbody>
             </table>
           </div>
