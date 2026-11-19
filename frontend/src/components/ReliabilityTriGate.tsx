@@ -28,11 +28,22 @@ export const ReliabilityTriGate: React.FC<ReliabilityTriGateProps> = ({
   const gateFailures = decision?.gate_failures ?? [];
 
   // Gate 1: SQI
-  const gate1Pass = !gateFailures.includes('signal_quality_sqi');
+  const gate1Pass =
+    status !== 'REJECT_QUALITY' &&
+    !gateFailures.some((f) => f.toLowerCase().includes('quality') || f.toLowerCase().includes('sqi'));
   // Gate 2: Uncertainty
-  const gate2Pass = !gateFailures.includes('predictive_uncertainty');
+  const gate2Pass =
+    status !== 'ABSTAIN_UNCERTAIN' &&
+    !gateFailures.some((f) => f.toLowerCase().includes('uncertainty'));
   // Gate 3: Shift / OOD
-  const gate3Pass = !gateFailures.includes('distribution_shift_mahalanobis');
+  const gate3Pass =
+    status !== 'ABSTAIN_UNFAMILIAR' &&
+    !gateFailures.some(
+      (f) =>
+        f.toLowerCase().includes('shift') ||
+        f.toLowerCase().includes('unfamiliar') ||
+        f.toLowerCase().includes('morphology')
+    );
 
   const getStatusBadge = (s: DecisionStatus) => {
     switch (s) {
@@ -184,7 +195,7 @@ export const ReliabilityTriGate: React.FC<ReliabilityTriGateProps> = ({
                 <div>
                   <div className="font-semibold text-white">Gate 3: Shift / OOD Detection</div>
                   <div className="text-[10px] text-slate-400 font-mono">
-                    Criteria: Mahalanobis Distance D_M ≤ λ = 13.87 (Latent Feature Manifold)
+                    Criteria: Mahalanobis Distance D_M ≤ λ = 22.0 (Inter-Patient Manifold)
                   </div>
                 </div>
               </div>
