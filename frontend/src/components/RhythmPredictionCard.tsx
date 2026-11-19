@@ -1,6 +1,5 @@
 import React from 'react';
-import { ArrhythmiaClass, CLASS_LABELS, CLASS_COLORS, PredictionData } from '../types';
-import { ShieldCheck, AlertTriangle, Info } from 'lucide-react';
+import { CLASS_LABELS, CLASS_COLORS, PredictionData } from '../types';
 
 interface RhythmPredictionCardProps {
   prediction?: PredictionData;

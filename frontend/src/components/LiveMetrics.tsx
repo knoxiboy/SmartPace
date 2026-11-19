@@ -1,5 +1,5 @@
 import React from 'react';
-import { Heart, Activity, Gauge, Zap, CheckCircle2, AlertOctagon } from 'lucide-react';
+import { Heart, Activity, Gauge, Zap, CheckCircle2 } from 'lucide-react';
 import { VitalsData } from '../types';
 
 interface LiveMetricsProps {
@@ -18,7 +18,6 @@ export const LiveMetrics: React.FC<LiveMetricsProps> = ({ vitals, latencyMs = 12
   const sqi = vitals?.sqi_scores?.composite_sqi ?? 0.88;
   const bwSqi = vitals?.sqi_scores?.baseline_wander_sqi ?? 0.94;
   const hfSqi = vitals?.sqi_scores?.high_freq_sqi ?? 0.91;
-  const kurtSqi = vitals?.sqi_scores?.kurtosis_sqi ?? 0.86;
 
   // HR status classification
   const getHrColor = (rate: number) => {
@@ -107,7 +106,7 @@ export const LiveMetrics: React.FC<LiveMetricsProps> = ({ vitals, latencyMs = 12
         </div>
         <div className="mt-1.5 flex items-center justify-between text-[10px] font-mono text-slate-400">
           <span className={sqiStatus.color}>{sqiStatus.label}</span>
-          <span>BW: {(bwSqi * 100).toFixed(0)}%</span>
+          <span>BW: {(bwSqi * 100).toFixed(0)}% • HF: {(hfSqi * 100).toFixed(0)}%</span>
         </div>
       </div>
 

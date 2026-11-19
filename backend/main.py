@@ -18,24 +18,32 @@ from .services.stream_manager import StreamManager
 from .routes import stream, inference, explainability, stress_test, evaluation, system_info, benchmark
 
 
+def init_app_state(app: FastAPI):
+    """Ensures ML engine and services are initialized in app.state."""
+    if not hasattr(app.state, "engine") or app.state.engine is None:
+        engine = SmartPaceEngine()
+        ecg_source = ECGSourceManager()
+        event_store = EventStore()
+        stream_manager = StreamManager(ecg_source=ecg_source, engine=engine, event_store=event_store)
+
+        app.state.engine = engine
+        app.state.ecg_source = ecg_source
+        app.state.event_store = event_store
+        app.state.stream_manager = stream_manager
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initializes models and stream managers on startup, cleans up on shutdown."""
     print("[SmartPace Live] Initializing ML Engine and Data Sources...", flush=True)
-    engine = SmartPaceEngine()
-    ecg_source = ECGSourceManager()
-    event_store = EventStore()
-    stream_manager = StreamManager(ecg_source=ecg_source, engine=engine, event_store=event_store)
-
-    app.state.engine = engine
-    app.state.ecg_source = ecg_source
-    app.state.event_store = event_store
-    app.state.stream_manager = stream_manager
+    init_app_state(app)
+    engine = app.state.engine
 
     print("[SmartPace Live] Engine ready! Model:", engine.arch, "Device:", engine.device, flush=True)
     yield
     print("[SmartPace Live] Shutting down stream manager...", flush=True)
-    await stream_manager.stop()
+    if hasattr(app.state, "stream_manager") and app.state.stream_manager is not None:
+        await app.state.stream_manager.stop()
 
 
 app = FastAPI(
@@ -44,6 +52,9 @@ app = FastAPI(
     version="2.0.0-research",
     lifespan=lifespan,
 )
+
+# Pre-populate state for resilient testing and fast cold-start
+init_app_state(app)
 
 # Enable CORS for local Vite dev server
 app.add_middleware(

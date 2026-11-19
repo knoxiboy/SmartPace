@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { EventItem, ArrhythmiaClass, CLASS_COLORS, DecisionStatus } from '../types';
-import { ExternalLink, Filter, ShieldCheck, AlertCircle, RefreshCw } from 'lucide-react';
+import { EventItem, CLASS_COLORS, DecisionStatus } from '../types';
+import { ExternalLink, Filter, RefreshCw } from 'lucide-react';
 
 interface EventTimelineProps {
   events: EventItem[];

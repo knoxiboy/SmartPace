@@ -2,7 +2,6 @@ import React from 'react';
 import {
   Activity,
   Cpu,
-  ShieldAlert,
   Search,
   Sliders,
   BarChart3,
